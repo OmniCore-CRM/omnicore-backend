@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  OWNER
+  ADMIN
+  TEAM_LEAD
+  AGENT
+  VIEWER
+}
+
+enum ConversationChannel {
+  WEBSITE
+  WHATSAPP
+  INSTAGRAM
+  EMAIL
+}
+
+enum MessageSender {
+  CUSTOMER
+  AGENT
+  SYSTEM
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Company {
+  id        String    @id @default(cuid())
+  name      String
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  users User[]
+  customers Customer[]
+  conversations Conversation[]
+  messages Message[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+
+  firstName     String
+  lastName      String
+
+  role UserRole @default(AGENT)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Customer {
+  id String @id @default(cuid())
+
+  // Tenant ownership
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Basic customer identity
+  firstName String
+  lastName  String?
+
+  email String?
+  phone String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Customer communication history
+  conversations Conversation[]
+}
+
+model Conversation {
+  id String @id @default(cuid())
+
+  // Tenant ownership
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Customer relationship
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  // Communication channel
+  channel ConversationChannel
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  messages Message[]
+
+  @@index([companyId])
+  @@index([customerId])
+}
+
+model Message {
+  id String @id @default(cuid())
+
+  // Tenant ownership
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Conversation relationship
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  // Message sender type
+  sender MessageSender
+
+  // Message content
+  content String
+
+  status MessageStatus @default(SENT)
+  externalMessageId String?
+  provider ConversationChannel?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([conversationId])
+}
