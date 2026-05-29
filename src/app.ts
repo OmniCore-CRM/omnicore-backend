@@ -6,15 +6,14 @@ import cookieParser from "cookie-parser";
 import routes from "@/routes/index.js";
 import { globalErrorHandler } from "@/core/middleware/error.middleware.js";
 import { notFoundHandler } from "@/core/middleware/not-found.middleware.js";
+import { env } from "@/config/env.js";
 
 const app = express();
 
 // Security middleware
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-    ],
+    origin: env.APP_ORIGINS,
     credentials: true,
 }));
 
@@ -24,7 +23,13 @@ app.use(helmet());
 app.use(morgan("dev"));
 
 // Parse incoming request bodies
-app.use(express.json());
+app.use(express.json({
+  limit: env.JSON_BODY_LIMIT,
+  verify: (req, _res, buffer) => {
+    (req as express.Request & { rawBody?: Buffer }).rawBody =
+      Buffer.from(buffer);
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 
 // Parse cookies

@@ -2,21 +2,19 @@ import { ConversationChannel, MessageSender } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { getIO } from "@/socket/socket.server.js";
 import type { CreateWidgetConversationInput, CreateWidgetMessageInput } from "./widget.validation.js";
-import { DEFAULT_COMPANY_ID } from "@/core/constants/app.constants.js";
+import { resolveDevelopmentIngestionCompanyId } from "@/core/utils/tenant-resolution.js";
+import { AppError } from "@/core/errors/app-error.js";
+import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import { mapMessage } from "@/modules/messages/message.mapper.js";
+import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
+import { mapCustomer } from "@/modules/customers/customer.mapper.js";
 
 export class WidgetService {
   // ===== Create public widget conversation =====
   static async createWidgetConversation(
     data: CreateWidgetConversationInput
   ) {
-    // TODO
-    // Later this will come from:
-    // - widget token
-    // - domain config
-    // - tenant mapping
-
-    // Temporary hardcoded tenant for MVP
-    const companyId = DEFAULT_COMPANY_ID;
+    const companyId = resolveDevelopmentIngestionCompanyId();
 
     // Create customer + conversation + message atomically
     const result = await prisma.$transaction(
@@ -64,21 +62,49 @@ export class WidgetService {
 
     io.to(
       `conversation:${result.conversation.id}`
-    ).emit("new_message", result.message);
+    ).emit("new_message", mapMessage(result.message));
 
     // Notify agent inbox about new conversation
-    io.emit(
+    io.to(`company:${companyId}`).emit(
       "new_conversation",
-      result.conversation
+      mapConversation({
+        ...result.conversation,
+        customer: result.customer,
+        messages: [result.message],
+      })
     );
 
-    return result;
+    return {
+      customer: mapCustomer(result.customer),
+      conversation: mapConversation({
+        ...result.conversation,
+        customer: result.customer,
+        messages: [result.message],
+      }),
+      message: mapMessage(result.message),
+    };
   }
 
   // ===== Send public widget message =====
   static async createWidgetMessage(data: CreateWidgetMessageInput) {
-    // Temporary hardcoded tenant for MVP
-    const companyId = "cmp0akvyj0000woqughybpvfb";
+    const companyId = resolveDevelopmentIngestionCompanyId();
+
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        id: data.conversationId,
+        companyId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!conversation) {
+      throw new AppError(
+        "Conversation not found",
+        HTTP_STATUS.NOT_FOUND
+      );
+    }
 
     // Create message + update conversation atomically
     const message = await prisma.$transaction(
@@ -113,8 +139,8 @@ export class WidgetService {
 
     io.to(
       `conversation:${data.conversationId}`
-    ).emit("new_message", message);
+    ).emit("new_message", mapMessage(message));
 
-    return message;
+    return mapMessage(message);
   }
 }

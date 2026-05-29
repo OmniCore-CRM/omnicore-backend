@@ -1,9 +1,60 @@
 import type { Request, Response } from "express";
+import crypto from "node:crypto";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { asyncHandler } from "@/core/utils/async-handler.js";
 import { sendResponse } from "@/core/utils/send-response.js";
 import { ChannelService } from "./channel.service.js";
 import { normalizeWhatsAppMessage } from "./channel.normalizers.js";
+import { env } from "@/config/env.js";
+import { AppError } from "@/core/errors/app-error.js";
+
+type RawBodyRequest = Request & {
+  rawBody?: Buffer;
+};
+
+const verifyMetaSignature = (req: RawBodyRequest) => {
+  if (
+    env.NODE_ENV === "development" &&
+    env.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT
+  ) {
+    return;
+  }
+
+  if (!env.WHATSAPP_APP_SECRET) {
+    throw new AppError(
+      "Webhook signature verification is not configured",
+      HTTP_STATUS.UNAUTHORIZED
+    );
+  }
+
+  const signatureHeader = req.get("x-hub-signature-256");
+
+  if (!signatureHeader?.startsWith("sha256=") || !req.rawBody) {
+    throw new AppError(
+      "Invalid webhook signature",
+      HTTP_STATUS.UNAUTHORIZED
+    );
+  }
+
+  const expectedSignature =
+    `sha256=${crypto
+      .createHmac("sha256", env.WHATSAPP_APP_SECRET)
+      .update(req.rawBody)
+      .digest("hex")}`;
+
+  const received = Buffer.from(signatureHeader);
+  const expected = Buffer.from(expectedSignature);
+
+  if (
+    received.length !== expected.length ||
+    !crypto.timingSafeEqual(received, expected)
+  ) {
+    throw new AppError(
+      "Invalid webhook signature",
+      HTTP_STATUS.UNAUTHORIZED
+    );
+  }
+};
 
 export class ChannelController {
   // ===== Webhook verification =====
@@ -18,10 +69,9 @@ export class ChannelController {
       // Validate verification request
       if (
         mode === "subscribe" &&
-        token === process.env.WHATSAPP_VERIFY_TOKEN
+        env.WHATSAPP_VERIFY_TOKEN &&
+        token === env.WHATSAPP_VERIFY_TOKEN
       ) {
-        console.log("Webhook verified successfully");
-        
         return res.status(HTTP_STATUS.OK).send(challenge);
       }
 
@@ -33,8 +83,8 @@ export class ChannelController {
   // ===== Receive external webhook events =====
   static receiveWebhook = asyncHandler(
     
-    async (req: Request, res: Response) => {
-      console.log("Webhook POST hit");
+    async (req: RawBodyRequest, res: Response) => {
+      verifyMetaSignature(req);
 
       // Extract WhatsApp webhook payload safely
       const entry = req.body?.entry?.[0];

@@ -16,6 +16,8 @@ export const globalErrorHandler = (
     return res.status(error.statusCode).json({
       success: false,
       message: error.message,
+      code: error.code,
+      details: error.details,
     });
   }
 

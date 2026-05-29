@@ -81,6 +81,7 @@ export class MessageService {
     // Route outbound message through connected provider
     if (conversation.channel === "WHATSAPP") {
       await ChannelService.sendOutboundMessage({
+        messageId: message.id,
         conversationId: conversation.id,
         content: data.content,
       });

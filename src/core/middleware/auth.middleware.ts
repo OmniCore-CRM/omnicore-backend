@@ -7,7 +7,6 @@ import jwt from "jsonwebtoken";
 import { env } from "@/config/env.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
-import { error } from "node:console";
 
 // JWT authentication payload structure
 interface JwtPayload {
@@ -51,7 +50,7 @@ export const protect = (
     req.user = decoded;
 
     next();
-  } catch (_error) {
+  } catch (error) {
     // Handle expired JWT tokens
     if (error instanceof jwt.TokenExpiredError) {
       throw new AppError(
@@ -61,7 +60,7 @@ export const protect = (
     }
 
     // Handle malformed or invalid JWT tokens
-    if ( error instanceof jwt.JsonWebTokenError) {
+    if (error instanceof jwt.JsonWebTokenError) {
       throw new AppError(
         "Invalid token",
         HTTP_STATUS.UNAUTHORIZED

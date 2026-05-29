@@ -2,6 +2,7 @@ import { Server as SocketIOServer } from "socket.io";
 import type { Server as HTTPServer } from "http";
 import jwt from "jsonwebtoken";
 import { env } from "@/config/env.js";
+import { prisma } from "@/config/db.js";
 
 interface SocketUser {
   userId: string;
@@ -14,7 +15,7 @@ let io: SocketIOServer;
 export const initializeSocketServer = (httpServer: HTTPServer) => {
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "http://localhost:3000",
+      origin: env.SOCKET_ORIGINS,
     },
   });
 
@@ -46,26 +47,74 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
     // Auto-join company room so tenant-scoped broadcasts reach this socket.
     void socket.join(`company:${companyId}`);
 
-    // Join conversation-specific room on client request.
+    const isAuthorizedConversation = async (conversationId: string) => {
+      if (!conversationId) {
+        return false;
+      }
+
+      const conversation = await prisma.conversation.findFirst({
+        where: {
+          id: conversationId,
+          companyId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      return Boolean(conversation);
+    };
+
+    const emitRoomAuthorizationError = () => {
+      socket.emit("conversation:join_error", {
+        message: "Conversation not available",
+      });
+    };
+
     socket.on("join_conversation", (conversationId: string) => {
-      void socket.join(`conversation:${conversationId}`);
+      void (async () => {
+        if (!(await isAuthorizedConversation(conversationId))) {
+          emitRoomAuthorizationError();
+          return;
+        }
+
+        await socket.join(`conversation:${conversationId}`);
+      })();
+    });
+
+    socket.on("leave_conversation", (conversationId: string) => {
+      if (conversationId) {
+        void socket.leave(`conversation:${conversationId}`);
+      }
     });
 
     // Forward typing indicators to other participants in the same conversation room.
     socket.on("typing:start", (payload: { conversationId: string }) => {
-      if (payload?.conversationId) {
-        socket.to(`conversation:${payload.conversationId}`).emit("typing:start", {
-          conversationId: payload.conversationId,
+      void (async () => {
+        const conversationId = payload?.conversationId;
+
+        if (!(await isAuthorizedConversation(conversationId))) {
+          return;
+        }
+
+        socket.to(`conversation:${conversationId}`).emit("typing:start", {
+          conversationId,
         });
-      }
+      })();
     });
 
     socket.on("typing:stop", (payload: { conversationId: string }) => {
-      if (payload?.conversationId) {
-        socket.to(`conversation:${payload.conversationId}`).emit("typing:stop", {
-          conversationId: payload.conversationId,
+      void (async () => {
+        const conversationId = payload?.conversationId;
+
+        if (!(await isAuthorizedConversation(conversationId))) {
+          return;
+        }
+
+        socket.to(`conversation:${conversationId}`).emit("typing:stop", {
+          conversationId,
         });
-      }
+      })();
     });
   });
 

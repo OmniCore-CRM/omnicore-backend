@@ -1,1 +1,0 @@
-export const DEFAULT_COMPANY_ID = process.env.DEFAULT_COMPANY_ID || "";
