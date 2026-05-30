@@ -3,6 +3,13 @@ import type { CreateCustomerInput } from "./customer.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { mapCustomer, mapCustomers } from "./customer.mapper.js";
+import type { PaginationParams } from "@/core/utils/pagination.js";
+import { toPaginatedResult } from "@/core/utils/pagination.js";
+import type { Prisma } from "@prisma/client";
+
+type CustomerListParams = PaginationParams & {
+  search?: unknown;
+};
 
 export class CustomerService {
   // ===== Create customer under authenticated tenant =====
@@ -23,18 +30,78 @@ export class CustomerService {
   }
 
   // ===== Fetch customers belonging to authenticated tenant =====
-  static async getCustomers(companyId: string) {
-    const customers = await prisma.customer.findMany({
-      where: {
-        companyId,
-      },
+  static async getCustomers(
+    companyId: string,
+    params: CustomerListParams
+  ) {
+    const search =
+      typeof params.search === "string"
+        ? params.search.trim()
+        : "";
 
-      orderBy: {
-        createdAt: "desc",
-      },
+    const where: Prisma.CustomerWhereInput = {
+      companyId,
+      ...(search
+        ? {
+            OR: [
+              {
+                firstName: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+              {
+                lastName: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+              {
+                email: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+              {
+                phone: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const customers = await prisma.customer.findMany({
+      where,
+
+      orderBy: [
+        {
+          createdAt: "desc",
+        },
+        {
+          id: "desc",
+        },
+      ],
+
+      take: params.limit + 1,
+      ...(params.cursor
+        ? {
+            cursor: {
+              id: params.cursor,
+            },
+            skip: 1,
+          }
+        : {}),
     });
 
-    return mapCustomers(customers);
+    const page = toPaginatedResult(customers, params.limit);
+
+    return {
+      ...page,
+      items: mapCustomers(page.items),
+    };
   }
 
   // ===== Fetch single customer belonging to authenticated tenant =====

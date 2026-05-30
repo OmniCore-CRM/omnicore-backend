@@ -6,6 +6,8 @@ import type { CreateMessageInput } from "./message.validation.js";
 import { getIO } from "@/socket/socket.server.js";
 import { ChannelService } from "../channels/channel.service.js";
 import { mapMessage, mapMessages } from "./message.mapper.js";
+import type { PaginationParams } from "@/core/utils/pagination.js";
+import { toPaginatedResult } from "@/core/utils/pagination.js";
 
 export class MessageService {
   // ===== Create tenant-scoped message =====
@@ -104,7 +106,8 @@ export class MessageService {
   // ===== Fetch messages belonging to tenant conversation =====
   static async getConversationMessages(
     companyId: string,
-    conversationId: string
+    conversationId: string,
+    params: PaginationParams
   ) {
     // Ensure conversation belongs to authenticated tenant
     const conversation = await prisma.conversation.findFirst({
@@ -129,11 +132,31 @@ export class MessageService {
         conversationId,
       },
 
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: [
+        {
+          createdAt: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+
+      take: params.limit + 1,
+      ...(params.cursor
+        ? {
+            cursor: {
+              id: params.cursor,
+            },
+            skip: 1,
+          }
+        : {}),
     });
 
-    return mapMessages(messages);
+    const page = toPaginatedResult(messages, params.limit);
+
+    return {
+      ...page,
+      items: mapMessages(page.items),
+    };
   }
 }

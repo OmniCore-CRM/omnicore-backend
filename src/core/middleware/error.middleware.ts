@@ -3,11 +3,12 @@ import { AppError } from "@/core/errors/app-error.js";
 import { ZodError } from "zod";
 import { Prisma } from "@prisma/client";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import type { RequestWithId } from "./request-id.middleware.js";
 
 // Global error handler
 export const globalErrorHandler = (
   error: Error,
-  _req: Request,
+  req: RequestWithId,
   res: Response,
   _next: NextFunction
 ) => {
@@ -18,6 +19,7 @@ export const globalErrorHandler = (
       message: error.message,
       code: error.code,
       details: error.details,
+      requestId: req.requestId,
     });
   }
 
@@ -39,6 +41,7 @@ export const globalErrorHandler = (
       success: false,
       message: "Validation failed",
       errors: formattedErrors,
+      requestId: req.requestId,
     });
   }
 
@@ -49,6 +52,7 @@ export const globalErrorHandler = (
       return res.status(HTTP_STATUS.CONFLICT).json({
         success: false,
         message: "Resource already exists",
+        requestId: req.requestId,
       });
     }
   }
@@ -58,14 +62,24 @@ export const globalErrorHandler = (
     return res.status(HTTP_STATUS.BAD_REQUEST).json({
       success: false,
       message: "Invalid database query",
+      requestId: req.requestId,
     });
   }
 
-  console.error("Unhandled Error:", error);
+  console.error(JSON.stringify({
+    level: "error",
+    event: "unhandled_error",
+    requestId: req.requestId,
+    message: error.message,
+    stack: process.env.NODE_ENV === "production"
+      ? undefined
+      : error.stack,
+  }));
 
   // Fallback for unexpected errors
   return res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
     success: false,
     message: "Internal server error",
+    requestId: req.requestId,
   });
 };

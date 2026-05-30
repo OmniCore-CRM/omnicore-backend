@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import routes from "@/routes/index.js";
 import { globalErrorHandler } from "@/core/middleware/error.middleware.js";
 import { notFoundHandler } from "@/core/middleware/not-found.middleware.js";
 import { env } from "@/config/env.js";
+import { prisma } from "@/config/db.js";
+import { requestIdMiddleware } from "@/core/middleware/request-id.middleware.js";
+import { accessLogMiddleware } from "@/core/middleware/access-log.middleware.js";
 
 const app = express();
 
@@ -19,8 +21,8 @@ app.use(
 
 app.use(helmet());
 
-// Request logging
-app.use(morgan("dev"));
+app.use(requestIdMiddleware);
+app.use(accessLogMiddleware);
 
 // Parse incoming request bodies
 app.use(express.json({
@@ -41,6 +43,29 @@ app.get("/", (_req, res) => {
     success: true,
     message: "Omnichannel CRM API is running...",
   });
+});
+
+app.get("/healthz", (_req, res) => {
+  res.status(200).json({
+    success: true,
+    status: "ok",
+  });
+});
+
+app.get("/readyz", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+
+    return res.status(200).json({
+      success: true,
+      status: "ready",
+    });
+  } catch {
+    return res.status(503).json({
+      success: false,
+      status: "not_ready",
+    });
+  }
 });
 
 // API routes

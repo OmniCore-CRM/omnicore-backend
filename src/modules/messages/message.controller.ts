@@ -4,6 +4,7 @@ import { asyncHandler } from "@/core/utils/async-handler.js";
 import { sendResponse } from "@/core/utils/send-response.js";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { MessageService } from "./message.service.js";
+import { parsePaginationQuery } from "@/core/utils/pagination.js";
 
 export class MessageController {
   // ===== Create tenant-scoped message =====
@@ -42,11 +43,13 @@ export class MessageController {
 
       // Extract conversation ID from route params
       const conversationId = req.params.id as string;
+      const pagination = parsePaginationQuery(req.query);
 
       // Fetch tenant-scoped conversation messages
       const messages = await MessageService.getConversationMessages(
         companyId,
-        conversationId
+        conversationId,
+        pagination
       );
 
       // Send successful API response

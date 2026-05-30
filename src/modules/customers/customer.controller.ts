@@ -4,6 +4,7 @@ import { sendResponse } from "@/core/utils/send-response.js";
 import { asyncHandler } from "@/core/utils/async-handler.js";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { CustomerService } from "./customer.service.js";
+import { parsePaginationQuery } from "@/core/utils/pagination.js";
 
 export class CustomerController {
   // ===== Create customer under authenticated tenant =====
@@ -34,9 +35,16 @@ export class CustomerController {
     async (req: AuthenticatedRequest, res: Response) => {
       // companyId comes from authenticated JWT context
       const companyId = req.user!.companyId;
+      const pagination = parsePaginationQuery(req.query);
 
       // Fetch tenant-scoped customers
-      const customers = await CustomerService.getCustomers(companyId);
+      const customers = await CustomerService.getCustomers(
+        companyId,
+        {
+          ...pagination,
+          search: req.query.search,
+        }
+      );
 
       // Send successful API response
       return sendResponse({

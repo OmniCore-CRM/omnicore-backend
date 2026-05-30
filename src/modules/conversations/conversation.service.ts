@@ -1,8 +1,27 @@
+import { ConversationChannel, type Prisma } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import type { CreateConversationInput } from "./conversation.validation.js";
 import { mapConversation, mapConversations } from "./conversation.mapper.js";
+import type { PaginationParams } from "@/core/utils/pagination.js";
+import { toPaginatedResult } from "@/core/utils/pagination.js";
+
+type ConversationListParams = PaginationParams & {
+  search?: unknown;
+  channel?: unknown;
+};
+
+const isConversationChannel = (
+  value: unknown
+): value is ConversationChannel => {
+  return (
+    typeof value === "string" &&
+    Object.values(ConversationChannel).includes(
+      value as ConversationChannel
+    )
+  );
+};
 
 export class ConversationService {
   // ===== Create tenant-scoped conversation =====
@@ -43,22 +62,88 @@ export class ConversationService {
   }
 
   // ===== Fetch conversations belonging to authenticated tenant =====
-  static async getConversations(companyId: string) {
+  static async getConversations(
+    companyId: string,
+    params: ConversationListParams
+  ) {
+    const search =
+      typeof params.search === "string"
+        ? params.search.trim()
+        : "";
+    const channel = isConversationChannel(params.channel)
+      ? params.channel
+      : undefined;
+
+    const where: Prisma.ConversationWhereInput = {
+      companyId,
+      ...(channel ? { channel } : {}),
+      ...(search
+        ? {
+            customer: {
+              OR: [
+                {
+                  firstName: {
+                    contains: search,
+                    mode: "insensitive",
+                  },
+                },
+                {
+                  lastName: {
+                    contains: search,
+                    mode: "insensitive",
+                  },
+                },
+                {
+                  email: {
+                    contains: search,
+                    mode: "insensitive",
+                  },
+                },
+                {
+                  phone: {
+                    contains: search,
+                    mode: "insensitive",
+                  },
+                },
+              ],
+            },
+          }
+        : {}),
+    };
+
     const conversations = await prisma.conversation.findMany({
-      where: {
-        companyId,
-      },
+      where,
 
       include: {
         customer: true,
       },
 
-      orderBy: {
-        updatedAt: "desc",
-      },
+      orderBy: [
+        {
+          updatedAt: "desc",
+        },
+        {
+          id: "desc",
+        },
+      ],
+
+      take: params.limit + 1,
+      ...(params.cursor
+        ? {
+            cursor: {
+              id: params.cursor,
+            },
+            skip: 1,
+          }
+        : {}),
     });
 
-    return mapConversations(conversations);
+    const page = toPaginatedResult(conversations, params.limit);
+
+    return {
+      ...page,
+      items: mapConversations(page.items),
+    };
   }
 
   // ===== Fetch single tenant-scoped conversation =====
@@ -77,9 +162,14 @@ export class ConversationService {
         customer: true,
 
         messages: {
-          orderBy: {
-            createdAt: "asc",
-          },
+          orderBy: [
+            {
+              createdAt: "asc",
+            },
+            {
+              id: "asc",
+            },
+          ],
         },
       },
     });
