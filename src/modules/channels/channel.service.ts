@@ -1,5 +1,5 @@
 import type { IncomingChannelMessage, ChannelDeliveryEvent } from "./channel.types.js";
-import { ConversationChannel, MessageSender, MessageStatus } from "@prisma/client";
+import { ConversationChannel, MessageSender, MessageStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { getIO } from "@/socket/socket.server.js";
 import axios from "axios";
@@ -66,52 +66,95 @@ const logWhatsAppProviderFailure = (
   });
 };
 
+const messageStatusRank: Record<MessageStatus, number> = {
+  PENDING: 0,
+  SENT: 1,
+  DELIVERED: 2,
+  READ: 3,
+  FAILED: 4,
+};
+
+const emitMessageStatusUpdated = (message: Awaited<ReturnType<typeof prisma.message.update>>) => {
+  const io = getIO();
+
+  io.to(`conversation:${message.conversationId}`).emit(
+    "message_status_updated",
+    mapMessage(message)
+  );
+};
+
 export class ChannelService {
   // ===== Process inbound provider message =====
   static async processIncomingMessage(payload: IncomingChannelMessage) {
     const companyId = resolveDevelopmentIngestionCompanyId();
 
+    const existingMessage = await prisma.message.findFirst({
+      where: {
+        companyId,
+        provider: ConversationChannel.WHATSAPP,
+        externalMessageId: payload.externalMessageId,
+      },
+    });
+
+    if (existingMessage) {
+      return;
+    }
+
     // Track whether conversation was newly created
     let isNewConversation = false;
 
     // Process CRM flow atomically
-    const result = await prisma.$transaction(
-      async (tx) => {
-        // Find existing customer by phone
-        let customer =
-          await tx.customer.findFirst({
-            where: {
+    const result = await prisma.$transaction(async (tx) => {
+      // Find existing customer by phone
+      let customer =
+        await tx.customer.findFirst({
+          where: {
+            companyId,
+
+            phone:
+              payload.customerPhone || payload.externalUserId,
+          },
+        });
+
+      // Create customer if not found
+      if (!customer) {
+        customer =
+          await tx.customer.create({
+            data: {
               companyId,
 
+              firstName:
+                payload.customerName ||
+                "Unknown",
+
+              lastName: "Customer",
+
               phone:
-                payload.customerPhone || payload.externalUserId,
+                payload.customerPhone ||
+                payload.externalUserId,
             },
           });
+      }
 
-        // Create customer if not found
-        if (!customer) {
-          customer =
-            await tx.customer.create({
-              data: {
-                companyId,
+      // Find existing conversation
+      let conversation =
+        await tx.conversation.findFirst({
+          where: {
+            companyId,
 
-                firstName:
-                  payload.customerName ||
-                  "Unknown",
+            customerId:
+              customer.id,
 
-                lastName: "Customer",
+            channel:
+              ConversationChannel.WHATSAPP,
+          },
+        });
 
-                phone:
-                  payload.customerPhone ||
-                  payload.externalUserId,
-              },
-            });
-        }
-
-        // Find existing conversation
-        let conversation =
-          await tx.conversation.findFirst({
-            where: {
+      // Create conversation if not found
+      if (!conversation) {
+        conversation =
+          await tx.conversation.create({
+            data: {
               companyId,
 
               customerId:
@@ -122,56 +165,53 @@ export class ChannelService {
             },
           });
 
-        // Create conversation if not found
-        if (!conversation) {
-          conversation =
-            await tx.conversation.create({
-              data: {
-                companyId,
+        isNewConversation = true;
+      }
 
-                customerId:
-                  customer.id,
-
-                channel:
-                  ConversationChannel.WHATSAPP,
-              },
-            });
-
-          isNewConversation = true;
-        }
-
-        // Create CRM message
-        const message =
-          await tx.message.create({
-            data: {
-              companyId,
-              conversationId: conversation.id,
-              sender: MessageSender.CUSTOMER,
-              content: payload.content,
-              status: MessageStatus.DELIVERED,
-              externalMessageId: payload.externalMessageId,
-              provider: ConversationChannel.WHATSAPP,
-            },
-          });
-
-        // Update conversation activity timestamp
-        await tx.conversation.update({
-          where: {
-            id: conversation.id,
-          },
-
+      // Create CRM message
+      const message =
+        await tx.message.create({
           data: {
-            updatedAt: new Date(),
+            companyId,
+            conversationId: conversation.id,
+            sender: MessageSender.CUSTOMER,
+            content: payload.content,
+            status: MessageStatus.DELIVERED,
+            externalMessageId: payload.externalMessageId,
+            provider: ConversationChannel.WHATSAPP,
           },
         });
 
-        return {
-          customer,
-          conversation,
-          message,
-        };
+      // Update conversation activity timestamp
+      await tx.conversation.update({
+        where: {
+          id: conversation.id,
+        },
+
+        data: {
+          updatedAt: new Date(),
+        },
+      });
+
+      return {
+        customer,
+        conversation,
+        message,
+      };
+    }).catch((error) => {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        return null;
       }
-    );
+
+      throw error;
+    });
+
+    if (!result) {
+      return;
+    }
 
     // Emit realtime inbox update
     const io = getIO();
@@ -196,15 +236,26 @@ export class ChannelService {
 
   // ===== Process delivery/read events =====
   static async processDeliveryEvent(payload: ChannelDeliveryEvent) {
+    const companyId = resolveDevelopmentIngestionCompanyId();
+
     // Find CRM message by provider message ID
     const message = await prisma.message.findFirst({
       where: {
+        companyId,
+        provider: ConversationChannel.WHATSAPP,
         externalMessageId: payload.externalMessageId,
       },
     });
 
     // Message may not exist yet
     if (!message) {
+      return;
+    }
+
+    if (
+      messageStatusRank[payload.status] <
+      messageStatusRank[message.status]
+    ) {
       return;
     }
 
@@ -219,13 +270,7 @@ export class ChannelService {
       },
     });
 
-    // Emit realtime delivery update
-    const io = getIO();
-
-    io.to(`conversation:${message.conversationId}`).emit(
-      "message_status_updated",
-      mapMessage(updatedMessage)
-    );
+    emitMessageStatusUpdated(updatedMessage);
   }
 
   // ===== Send outbound provider message =====
@@ -284,6 +329,18 @@ export class ChannelService {
       !env.WHATSAPP_PHONE_NUMBER_ID ||
       !env.WHATSAPP_ACCESS_TOKEN
     ) {
+      const failedMessage = await prisma.message.update({
+        where: {
+          id: messageId,
+        },
+        data: {
+          status: MessageStatus.FAILED,
+          provider: ConversationChannel.WHATSAPP,
+        },
+      });
+
+      emitMessageStatusUpdated(failedMessage);
+
       throw new AppError(
         "WhatsApp provider is not configured",
         HTTP_STATUS.BAD_GATEWAY,
@@ -334,7 +391,7 @@ export class ChannelService {
       if (axios.isAxiosError(error)) {
         const failure = normalizeWhatsAppProviderFailure(error);
 
-        await prisma.message.update({
+        const failedMessage = await prisma.message.update({
           where: {
             id: messageId,
           },
@@ -344,18 +401,7 @@ export class ChannelService {
           },
         });
 
-        const io = getIO();
-
-        io.to(`conversation:${conversationId}`).emit(
-          "message_status_updated",
-          mapMessage(
-            await prisma.message.findUniqueOrThrow({
-              where: {
-                id: messageId,
-              },
-            })
-          )
-        );
+        emitMessageStatusUpdated(failedMessage);
 
         logWhatsAppProviderFailure(
           {
@@ -391,9 +437,7 @@ export class ChannelService {
     });
 
     // Emit realtime inbox update
-    const io = getIO();
-
-    io.to(`conversation:${conversationId}`).emit("new_message", mapMessage(message));
+    emitMessageStatusUpdated(message);
 
     return message;
   }

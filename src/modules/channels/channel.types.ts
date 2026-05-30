@@ -32,6 +32,7 @@ export type ChannelDeliveryEvent = {
   externalMessageId: string;
 
   status:
+    | "PENDING"
     | "SENT"
     | "DELIVERED"
     | "READ"

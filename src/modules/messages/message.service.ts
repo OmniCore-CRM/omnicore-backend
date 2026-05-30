@@ -1,3 +1,4 @@
+import { MessageStatus } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -53,6 +54,15 @@ export class MessageService {
             conversationId: data.conversationId,
             sender: data.sender,
             content: data.content,
+            status:
+              conversation.channel === "WHATSAPP" &&
+              data.sender === "AGENT"
+                ? MessageStatus.PENDING
+                : MessageStatus.SENT,
+            provider:
+              conversation.channel === "WHATSAPP"
+                ? "WHATSAPP"
+                : null,
           },
         });
 
@@ -67,24 +77,25 @@ export class MessageService {
           },
         });
 
-        // Emit realtime message event
-        const io = getIO();
-
-        io.to(
-          `conversation:${data.conversationId}`
-        ).emit("new_message", mapMessage(createdMessage));
-
         return createdMessage;
       }
     );
 
+    const io = getIO();
+
+    io.to(
+      `conversation:${data.conversationId}`
+    ).emit("new_message", mapMessage(message));
+
     // Route outbound message through connected provider
     if (conversation.channel === "WHATSAPP") {
-      await ChannelService.sendOutboundMessage({
+      const providerMessage = await ChannelService.sendOutboundMessage({
         messageId: message.id,
         conversationId: conversation.id,
         content: data.content,
       });
+
+      return mapMessage(providerMessage);
     }
 
     return mapMessage(message);

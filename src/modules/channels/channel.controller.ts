@@ -4,7 +4,7 @@ import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { asyncHandler } from "@/core/utils/async-handler.js";
 import { sendResponse } from "@/core/utils/send-response.js";
 import { ChannelService } from "./channel.service.js";
-import { normalizeWhatsAppMessage } from "./channel.normalizers.js";
+import { normalizeWhatsAppMessage, normalizeWhatsAppStatus } from "./channel.normalizers.js";
 import { env } from "@/config/env.js";
 import { AppError } from "@/core/errors/app-error.js";
 
@@ -91,6 +91,21 @@ export class ChannelController {
       const change = entry?.changes?.[0];
       const value = change?.value;
       const incomingMessage = value?.messages?.[0];
+      const statusReceipt = value?.statuses?.[0];
+
+      if (statusReceipt) {
+        const normalizedStatus = normalizeWhatsAppStatus(statusReceipt);
+
+        if (normalizedStatus) {
+          await ChannelService.processDeliveryEvent(normalizedStatus);
+        }
+
+        return sendResponse({
+          res,
+          statusCode: HTTP_STATUS.OK,
+          message: "Webhook status event received successfully",
+        });
+      }
 
       // Ignore webhook if no inbound message exists
       if (!incomingMessage) {

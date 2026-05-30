@@ -30,6 +30,7 @@ export const mapConversation = (
 
     messages: conversation.messages?.map((message) => ({
       id: message.id,
+      companyId: message.companyId,
       conversationId: message.conversationId,
 
       sender: message.sender,

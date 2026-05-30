@@ -30,6 +30,7 @@ enum MessageSender {
 }
 
 enum MessageStatus {
+  PENDING
   SENT
   DELIVERED
   READ
@@ -136,4 +137,5 @@ model Message {
 
   @@index([companyId])
   @@index([conversationId])
+  @@index([companyId, provider, externalMessageId])
 }
