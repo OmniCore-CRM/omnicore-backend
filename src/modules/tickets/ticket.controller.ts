@@ -79,6 +79,55 @@ export class TicketController {
     }
   );
 
+  static getTicketNotes = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const notes = await TicketService.getTicketNotes(
+        req.user!.companyId,
+        req.params.id as string
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Ticket notes retrieved successfully",
+        data: notes,
+      });
+    }
+  );
+
+  static createTicketNote = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const note = await TicketService.createTicketNote(
+        getUserContext(req),
+        req.params.id as string,
+        req.body
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.CREATED,
+        message: "Ticket note created successfully",
+        data: note,
+      });
+    }
+  );
+
+  static getTicketActivity = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const activity = await TicketService.getTicketActivity(
+        req.user!.companyId,
+        req.params.id as string
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Ticket activity retrieved successfully",
+        data: activity,
+      });
+    }
+  );
+
   static createTicketFromConversation = asyncHandler(
     async (req: AuthenticatedRequest, res: Response) => {
       const ticket = await TicketService.createTicketFromConversation(

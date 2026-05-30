@@ -6,6 +6,7 @@ import messageRoutes from "@/modules/messages/message.routes.js";
 import widgetRoutes from "@/modules/widget/widget.routes.js";
 import channelRoutes from "@/modules/channels/channel.routes.js";
 import ticketRoutes from "@/modules/tickets/ticket.routes.js";
+import userRoutes from "@/modules/users/user.routes.js";
 
 const router = Router();
 
@@ -14,6 +15,9 @@ router.use("/auth", authRoutes);
 
 // Customer routes
 router.use("/customers", customerRoutes);
+
+// User routes
+router.use("/users", userRoutes);
 
 // Conversation routes
 router.use("/conversations", conversationRoutes);

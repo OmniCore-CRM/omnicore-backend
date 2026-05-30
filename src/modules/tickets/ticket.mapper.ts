@@ -2,6 +2,8 @@ import type {
   Conversation,
   Customer,
   Ticket,
+  TicketActivity,
+  TicketNote,
   User,
 } from "@prisma/client";
 
@@ -10,6 +12,16 @@ type TicketWithRelations = Ticket & {
   createdBy: User;
   customer?: Customer | null;
   conversation?: Conversation | null;
+  notes?: TicketNoteWithAuthor[];
+  activities?: TicketActivityWithActor[];
+};
+
+type TicketNoteWithAuthor = TicketNote & {
+  author: User;
+};
+
+type TicketActivityWithActor = TicketActivity & {
+  actor: User;
 };
 
 const mapUserSummary = (user?: User | null) => {
@@ -68,9 +80,39 @@ export const mapTicket = (ticket: TicketWithRelations) => ({
   customer: mapCustomerSummary(ticket.customer),
   conversationId: ticket.conversationId,
   conversation: mapConversationSummary(ticket.conversation),
+  notes: ticket.notes?.map(mapTicketNote) ?? undefined,
+  activities: ticket.activities?.map(mapTicketActivity) ?? undefined,
   createdAt: ticket.createdAt,
   updatedAt: ticket.updatedAt,
 });
 
 export const mapTickets = (tickets: TicketWithRelations[]) =>
   tickets.map(mapTicket);
+
+export const mapTicketNote = (note: TicketNoteWithAuthor) => ({
+  id: note.id,
+  ticketId: note.ticketId,
+  authorId: note.authorId,
+  author: mapUserSummary(note.author),
+  content: note.content,
+  createdAt: note.createdAt,
+});
+
+export const mapTicketNotes = (notes: TicketNoteWithAuthor[]) =>
+  notes.map(mapTicketNote);
+
+export const mapTicketActivity = (
+  activity: TicketActivityWithActor
+) => ({
+  id: activity.id,
+  ticketId: activity.ticketId,
+  actorId: activity.actorId,
+  actor: mapUserSummary(activity.actor),
+  action: activity.action,
+  metadata: activity.metadata,
+  createdAt: activity.createdAt,
+});
+
+export const mapTicketActivities = (
+  activities: TicketActivityWithActor[]
+) => activities.map(mapTicketActivity);

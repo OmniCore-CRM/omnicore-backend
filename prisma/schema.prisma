@@ -52,6 +52,16 @@ enum TicketPriority {
   URGENT
 }
 
+enum TicketActivityAction {
+  TICKET_CREATED
+  TICKET_UPDATED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  ASSIGNED
+  UNASSIGNED
+  NOTE_ADDED
+}
+
 model Company {
   id        String    @id @default(cuid())
   name      String
@@ -65,6 +75,8 @@ model Company {
   messages Message[]
   widgetInstallations WidgetInstallation[]
   tickets Ticket[]
+  ticketNotes TicketNote[]
+  ticketActivities TicketActivity[]
 }
 
 model User {
@@ -85,6 +97,8 @@ model User {
 
   assignedTickets Ticket[] @relation("TicketAssignee")
   createdTickets Ticket[] @relation("TicketCreator")
+  ticketNotes TicketNote[] @relation("TicketNoteAuthor")
+  ticketActivities TicketActivity[] @relation("TicketActivityActor")
 }
 
 model Customer {
@@ -205,10 +219,57 @@ model Ticket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  notes TicketNote[]
+  activities TicketActivity[]
+
   @@index([companyId])
   @@index([conversationId])
   @@index([customerId])
   @@index([assigneeId])
   @@index([status])
   @@index([priority])
+}
+
+model TicketNote {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User @relation("TicketNoteAuthor", fields: [authorId], references: [id])
+
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([ticketId])
+  @@index([authorId])
+}
+
+model TicketActivity {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  actorId String
+  actor   User @relation("TicketActivityActor", fields: [actorId], references: [id])
+
+  action TicketActivityAction
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([ticketId])
+  @@index([actorId])
+  @@index([action])
 }

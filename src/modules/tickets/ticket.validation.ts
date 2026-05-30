@@ -69,6 +69,14 @@ export const updateTicketSchema = z.object({
   assigneeId: nullableIdSchema,
 });
 
+export const createTicketNoteSchema = z.object({
+  content: z
+    .string()
+    .trim()
+    .min(1, "Note content is required")
+    .max(5000, "Note is too long"),
+});
+
 export type TicketListQueryInput = z.infer<
   typeof ticketListQuerySchema
 >;
@@ -80,3 +88,7 @@ export type CreateConversationTicketInput = z.infer<
 >;
 
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
+
+export type CreateTicketNoteInput = z.infer<
+  typeof createTicketNoteSchema
+>;

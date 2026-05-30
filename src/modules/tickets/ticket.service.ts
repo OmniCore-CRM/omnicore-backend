@@ -1,12 +1,18 @@
-import type { Prisma } from "@prisma/client";
+import { TicketActivityAction, type Prisma } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { getIO } from "@/socket/socket.server.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
-import { mapTicket, mapTickets } from "./ticket.mapper.js";
+import {
+  mapTicket,
+  mapTicketActivities,
+  mapTicketNotes,
+  mapTickets,
+} from "./ticket.mapper.js";
 import type {
   CreateConversationTicketInput,
+  CreateTicketNoteInput,
   CreateTicketInput,
   TicketListQueryInput,
   UpdateTicketInput,
@@ -17,6 +23,26 @@ const ticketInclude = {
   createdBy: true,
   customer: true,
   conversation: true,
+} satisfies Prisma.TicketInclude;
+
+const ticketDetailInclude = {
+  ...ticketInclude,
+  notes: {
+    include: {
+      author: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  },
+  activities: {
+    include: {
+      actor: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  },
 } satisfies Prisma.TicketInclude;
 
 const viewerMutationError = new AppError(
@@ -135,7 +161,7 @@ export class TicketService {
         id: ticketId,
         companyId,
       },
-      include: ticketInclude,
+      include: ticketDetailInclude,
     });
 
     if (!ticket) {
@@ -157,19 +183,51 @@ export class TicketService {
       assigneeId: data.assigneeId ?? undefined,
     });
 
-    const ticket = await prisma.ticket.create({
-      data: {
-        companyId: user.companyId,
-        createdById: user.userId,
-        subject: data.subject,
-        description: data.description,
-        status: data.status,
-        priority: data.priority,
-        customerId: links.customerId,
-        conversationId: links.conversationId,
-        assigneeId: links.assigneeId,
-      },
-      include: ticketInclude,
+    const ticket = await prisma.$transaction(async (tx) => {
+      const created = await tx.ticket.create({
+        data: {
+          companyId: user.companyId,
+          createdById: user.userId,
+          subject: data.subject,
+          description: data.description,
+          status: data.status,
+          priority: data.priority,
+          customerId: links.customerId,
+          conversationId: links.conversationId,
+          assigneeId: links.assigneeId,
+        },
+        include: ticketInclude,
+      });
+
+      await tx.ticketActivity.create({
+        data: {
+          companyId: user.companyId,
+          ticketId: created.id,
+          actorId: user.userId,
+          action: TicketActivityAction.TICKET_CREATED,
+          metadata: {
+            status: created.status,
+            priority: created.priority,
+            assigneeId: created.assigneeId,
+          },
+        },
+      });
+
+      if (created.assigneeId) {
+        await tx.ticketActivity.create({
+          data: {
+            companyId: user.companyId,
+            ticketId: created.id,
+            actorId: user.userId,
+            action: TicketActivityAction.ASSIGNED,
+            metadata: {
+              assigneeId: created.assigneeId,
+            },
+          },
+        });
+      }
+
+      return created;
     });
 
     const dto = mapTicket(ticket);
@@ -209,18 +267,51 @@ export class TicketService {
       assigneeId: data.assigneeId ?? undefined,
     });
 
-    const ticket = await prisma.ticket.create({
-      data: {
-        companyId: user.companyId,
-        createdById: user.userId,
-        subject: data.subject,
-        description: data.description,
-        priority: data.priority,
-        customerId: links.customerId,
-        conversationId: links.conversationId,
-        assigneeId: links.assigneeId,
-      },
-      include: ticketInclude,
+    const ticket = await prisma.$transaction(async (tx) => {
+      const created = await tx.ticket.create({
+        data: {
+          companyId: user.companyId,
+          createdById: user.userId,
+          subject: data.subject,
+          description: data.description,
+          priority: data.priority,
+          customerId: links.customerId,
+          conversationId: links.conversationId,
+          assigneeId: links.assigneeId,
+        },
+        include: ticketInclude,
+      });
+
+      await tx.ticketActivity.create({
+        data: {
+          companyId: user.companyId,
+          ticketId: created.id,
+          actorId: user.userId,
+          action: TicketActivityAction.TICKET_CREATED,
+          metadata: {
+            source: "conversation",
+            conversationId,
+            customerId: created.customerId,
+            priority: created.priority,
+          },
+        },
+      });
+
+      if (created.assigneeId) {
+        await tx.ticketActivity.create({
+          data: {
+            companyId: user.companyId,
+            ticketId: created.id,
+            actorId: user.userId,
+            action: TicketActivityAction.ASSIGNED,
+            metadata: {
+              assigneeId: created.assigneeId,
+            },
+          },
+        });
+      }
+
+      return created;
     });
 
     const dto = mapTicket(ticket);
@@ -243,6 +334,9 @@ export class TicketService {
       },
       select: {
         id: true,
+        status: true,
+        priority: true,
+        assigneeId: true,
       },
     });
 
@@ -254,32 +348,184 @@ export class TicketService {
       assigneeId: data.assigneeId ?? undefined,
     });
 
-    const ticket = await prisma.ticket.update({
-      where: {
-        id: existing.id,
-      },
-      data: {
-        ...(data.subject !== undefined
-          ? { subject: data.subject }
-          : {}),
-        ...(data.description !== undefined
-          ? { description: data.description }
-          : {}),
-        ...(data.status !== undefined ? { status: data.status } : {}),
-        ...(data.priority !== undefined
-          ? { priority: data.priority }
-          : {}),
-        ...(data.assigneeId !== undefined
-          ? { assigneeId: links.assigneeId }
-          : {}),
-      },
-      include: ticketInclude,
+    const ticket = await prisma.$transaction(async (tx) => {
+      const updated = await tx.ticket.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          ...(data.subject !== undefined
+            ? { subject: data.subject }
+            : {}),
+          ...(data.description !== undefined
+            ? { description: data.description }
+            : {}),
+          ...(data.status !== undefined ? { status: data.status } : {}),
+          ...(data.priority !== undefined
+            ? { priority: data.priority }
+            : {}),
+          ...(data.assigneeId !== undefined
+            ? { assigneeId: links.assigneeId }
+            : {}),
+        },
+        include: ticketInclude,
+      });
+
+      const activities: Prisma.TicketActivityCreateManyInput[] = [];
+
+      if (data.status !== undefined && data.status !== existing.status) {
+        activities.push({
+          companyId: user.companyId,
+          ticketId: existing.id,
+          actorId: user.userId,
+          action: TicketActivityAction.STATUS_CHANGED,
+          metadata: {
+            from: existing.status,
+            to: data.status,
+          },
+        });
+      }
+
+      if (
+        data.priority !== undefined &&
+        data.priority !== existing.priority
+      ) {
+        activities.push({
+          companyId: user.companyId,
+          ticketId: existing.id,
+          actorId: user.userId,
+          action: TicketActivityAction.PRIORITY_CHANGED,
+          metadata: {
+            from: existing.priority,
+            to: data.priority,
+          },
+        });
+      }
+
+      if (
+        data.assigneeId !== undefined &&
+        links.assigneeId !== existing.assigneeId
+      ) {
+        activities.push({
+          companyId: user.companyId,
+          ticketId: existing.id,
+          actorId: user.userId,
+          action: links.assigneeId
+            ? TicketActivityAction.ASSIGNED
+            : TicketActivityAction.UNASSIGNED,
+          metadata: {
+            from: existing.assigneeId,
+            to: links.assigneeId,
+          },
+        });
+      }
+
+      if (
+        activities.length === 0 &&
+        (data.subject !== undefined || data.description !== undefined)
+      ) {
+        activities.push({
+          companyId: user.companyId,
+          ticketId: existing.id,
+          actorId: user.userId,
+          action: TicketActivityAction.TICKET_UPDATED,
+          metadata: {},
+        });
+      }
+
+      if (activities.length > 0) {
+        await tx.ticketActivity.createMany({
+          data: activities,
+        });
+      }
+
+      return updated;
     });
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
 
     return dto;
+  }
+
+  static async getTicketNotes(companyId: string, ticketId: string) {
+    await this.assertTicketExists(companyId, ticketId);
+
+    const notes = await prisma.ticketNote.findMany({
+      where: {
+        companyId,
+        ticketId,
+      },
+      include: {
+        author: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return mapTicketNotes(notes);
+  }
+
+  static async createTicketNote(
+    user: UserContext,
+    ticketId: string,
+    data: CreateTicketNoteInput
+  ) {
+    assertCanMutate(user);
+    await this.assertTicketExists(user.companyId, ticketId);
+
+    const note = await prisma.$transaction(async (tx) => {
+      const created = await tx.ticketNote.create({
+        data: {
+          companyId: user.companyId,
+          ticketId,
+          authorId: user.userId,
+          content: data.content,
+        },
+        include: {
+          author: true,
+        },
+      });
+
+      await tx.ticketActivity.create({
+        data: {
+          companyId: user.companyId,
+          ticketId,
+          actorId: user.userId,
+          action: TicketActivityAction.NOTE_ADDED,
+          metadata: {
+            noteId: created.id,
+          },
+        },
+      });
+
+      return created;
+    });
+
+    const dto = mapTicketNotes([note])[0];
+    getIO().to(`company:${user.companyId}`).emit("ticket_note_added", dto);
+
+    return dto;
+  }
+
+  static async getTicketActivity(companyId: string, ticketId: string) {
+    await this.assertTicketExists(companyId, ticketId);
+
+    const activities = await prisma.ticketActivity.findMany({
+      where: {
+        companyId,
+        ticketId,
+      },
+      include: {
+        actor: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return mapTicketActivities(activities);
   }
 
   private static async resolveTicketLinks(
@@ -366,5 +612,24 @@ export class TicketService {
       conversationId,
       assigneeId,
     };
+  }
+
+  private static async assertTicketExists(
+    companyId: string,
+    ticketId: string
+  ) {
+    const ticket = await prisma.ticket.findFirst({
+      where: {
+        id: ticketId,
+        companyId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!ticket) {
+      throw new AppError("Ticket not found", HTTP_STATUS.NOT_FOUND);
+    }
   }
 }
