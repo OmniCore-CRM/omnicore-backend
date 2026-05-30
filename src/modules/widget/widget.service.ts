@@ -1,5 +1,13 @@
 import crypto from "node:crypto";
-import { ConversationChannel, MessageSender } from "@prisma/client";
+import {
+  ConversationChannel,
+  MessageSender,
+  TicketActivityAction,
+  TicketPriority,
+  TicketStatus,
+  UserRole,
+  type Prisma,
+} from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { getIO } from "@/socket/socket.server.js";
 import type {
@@ -25,6 +33,7 @@ import {
   verifyWidgetSession,
 } from "./widget.session.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
+import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 
 type RequestOrigin = string | undefined;
 
@@ -62,6 +71,21 @@ const normalizeAllowedDomains = (domains: string[]) => {
 
 const createPublicKey = () =>
   `wpk_${crypto.randomBytes(24).toString("base64url")}`;
+
+const activeTicketStatuses = [
+  TicketStatus.OPEN,
+  TicketStatus.PENDING,
+  TicketStatus.ESCALATED,
+];
+
+const deriveTicketSubject = (content: string) => {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return "Website support request";
+
+  return normalized.length > 80
+    ? `${normalized.slice(0, 77)}...`
+    : normalized;
+};
 
 export class WidgetService {
   static async getInstallations(companyId: string) {
@@ -194,10 +218,19 @@ export class WidgetService {
         },
       });
 
+      const ticket = await this.createOrTouchWidgetTicket(tx, {
+        companyId: installation.companyId,
+        customerId: customer.id,
+        conversationId: conversation.id,
+        messageContent: data.initialMessage,
+        mode: "create",
+      });
+
       return {
         customer,
         conversation,
         message,
+        ticket,
       };
     });
 
@@ -221,6 +254,12 @@ export class WidgetService {
       "new_message",
       messageDto
     );
+    if (result.ticket.created) {
+      io.to(`company:${installation.companyId}`).emit(
+        "ticket_created",
+        mapTicket(result.ticket.ticket)
+      );
+    }
 
     return {
       sessionToken: signWidgetSession({
@@ -293,7 +332,7 @@ export class WidgetService {
       requestOrigin
     );
 
-    const message = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const createdMessage = await tx.message.create({
         data: {
           companyId: session.companyId,
@@ -312,10 +351,21 @@ export class WidgetService {
         },
       });
 
-      return createdMessage;
+      const ticket = await this.createOrTouchWidgetTicket(tx, {
+        companyId: session.companyId,
+        customerId: session.customerId,
+        conversationId,
+        messageContent: data.content,
+        mode: "message",
+      });
+
+      return {
+        message: createdMessage,
+        ticket,
+      };
     });
 
-    const messageDto = mapPublicWidgetMessage(message);
+    const messageDto = mapPublicWidgetMessage(result.message);
     const io = getIO();
 
     io.to(`company:${session.companyId}`).emit(
@@ -326,6 +376,12 @@ export class WidgetService {
       "new_message",
       messageDto
     );
+    if (result.ticket.created) {
+      io.to(`company:${session.companyId}`).emit(
+        "ticket_created",
+        mapTicket(result.ticket.ticket)
+      );
+    }
 
     return messageDto;
   }
@@ -411,5 +467,138 @@ export class WidgetService {
         HTTP_STATUS.FORBIDDEN
       );
     }
+  }
+
+  private static async createOrTouchWidgetTicket(
+    tx: Prisma.TransactionClient,
+    input: {
+      companyId: string;
+      customerId: string;
+      conversationId: string;
+      messageContent: string;
+      mode: "create" | "message";
+    }
+  ) {
+    const existingActiveTicket = await tx.ticket.findFirst({
+      where: {
+        companyId: input.companyId,
+        conversationId: input.conversationId,
+        status: {
+          in: activeTicketStatuses,
+        },
+      },
+      include: {
+        assignee: true,
+        createdBy: true,
+        customer: true,
+        conversation: true,
+      },
+      orderBy: [
+        {
+          updatedAt: "desc",
+        },
+        {
+          id: "desc",
+        },
+      ],
+    });
+
+    const actor = await tx.user.findFirst({
+      where: {
+        companyId: input.companyId,
+        role: {
+          in: [
+            UserRole.OWNER,
+            UserRole.ADMIN,
+            UserRole.TEAM_LEAD,
+            UserRole.AGENT,
+            UserRole.SUPER_ADMIN,
+          ],
+        },
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!actor) {
+      throw new AppError(
+        "Widget ticket automation is not configured",
+        HTTP_STATUS.INTERNAL_SERVER_ERROR
+      );
+    }
+
+    if (existingActiveTicket) {
+      await tx.ticket.update({
+        where: {
+          id: existingActiveTicket.id,
+        },
+        data: {
+          updatedAt: new Date(),
+        },
+      });
+
+      await tx.ticketActivity.create({
+        data: {
+          companyId: input.companyId,
+          ticketId: existingActiveTicket.id,
+          actorId: actor.id,
+          action: TicketActivityAction.MESSAGE_RECEIVED_ON_WIDGET,
+          metadata: {
+            source: "widget",
+            conversationId: input.conversationId,
+          },
+        },
+      });
+
+      return {
+        ticket: existingActiveTicket,
+        created: false,
+      };
+    }
+
+    const createdTicket = await tx.ticket.create({
+      data: {
+        companyId: input.companyId,
+        customerId: input.customerId,
+        conversationId: input.conversationId,
+        createdById: actor.id,
+        subject: deriveTicketSubject(input.messageContent),
+        description: input.messageContent,
+        status: TicketStatus.OPEN,
+        priority: TicketPriority.MEDIUM,
+      },
+      include: {
+        assignee: true,
+        createdBy: true,
+        customer: true,
+        conversation: true,
+      },
+    });
+
+    await tx.ticketActivity.create({
+      data: {
+        companyId: input.companyId,
+        ticketId: createdTicket.id,
+        actorId: actor.id,
+        action: TicketActivityAction.TICKET_CREATED_FROM_WIDGET,
+        metadata: {
+          source: "widget",
+          channel: ConversationChannel.WEBSITE,
+          conversationId: input.conversationId,
+          customerId: input.customerId,
+          priority: TicketPriority.MEDIUM,
+          trigger: input.mode,
+        },
+      },
+    });
+
+    return {
+      ticket: createdTicket,
+      created: true,
+    };
   }
 }
