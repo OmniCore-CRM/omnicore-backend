@@ -1,8 +1,10 @@
 import { Server as SocketIOServer } from "socket.io";
 import type { Server as HTTPServer } from "http";
 import jwt from "jsonwebtoken";
+import { ConversationChannel } from "@prisma/client";
 import { env } from "@/config/env.js";
 import { prisma } from "@/config/db.js";
+import type { WidgetSessionPayload } from "@/modules/widget/widget.session.js";
 
 interface SocketUser {
   userId: string;
@@ -10,7 +12,41 @@ interface SocketUser {
   role: string;
 }
 
+type AgentSocketData = SocketUser & {
+  authType: "agent";
+};
+
+type WidgetSocketData = WidgetSessionPayload & {
+  authType: "widget";
+};
+
+type SocketData = AgentSocketData | WidgetSocketData;
+
 let io: SocketIOServer;
+
+const normalizeDomain = (domain: string) => {
+  const trimmed = domain.trim().toLowerCase();
+  if (!trimmed) return "";
+
+  try {
+    const url = new URL(
+      trimmed.includes("://") ? trimmed : `https://${trimmed}`
+    );
+    return url.host;
+  } catch {
+    return trimmed.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  }
+};
+
+const originToDomain = (origin: string | undefined) => {
+  if (!origin) return "";
+
+  try {
+    return new URL(origin).host.toLowerCase();
+  } catch {
+    return normalizeDomain(origin);
+  }
+};
 
 export const initializeSocketServer = (httpServer: HTTPServer) => {
   io = new SocketIOServer(httpServer, {
@@ -21,7 +57,7 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
 
   // Verify JWT before allowing any socket connection.
   // Token is provided by the frontend SocketProvider via socket.handshake.auth.
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token as string | undefined;
 
     if (!token) {
@@ -29,8 +65,60 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
     }
 
     try {
-      const decoded = jwt.verify(token, env.JWT_SECRET) as SocketUser;
+      const decoded = jwt.verify(
+        token,
+        env.JWT_SECRET
+      ) as Partial<SocketUser & WidgetSessionPayload>;
 
+      if (decoded.tokenType === "widget_session") {
+        if (
+          !decoded.companyId ||
+          !decoded.widgetInstallationId ||
+          !decoded.conversationId ||
+          !decoded.customerId
+        ) {
+          return next(new Error("Invalid widget session token"));
+        }
+
+        const installation = await prisma.widgetInstallation.findFirst({
+          where: {
+            id: decoded.widgetInstallationId,
+            companyId: decoded.companyId,
+            enabled: true,
+          },
+          select: {
+            allowedDomains: true,
+          },
+        });
+        const requestDomain = originToDomain(
+          socket.handshake.headers.origin
+        );
+
+        if (
+          !installation ||
+          !requestDomain ||
+          !installation.allowedDomains
+            .map(normalizeDomain)
+            .includes(requestDomain)
+        ) {
+          return next(new Error("Widget is not available"));
+        }
+
+        socket.data.authType = "widget";
+        socket.data.companyId = decoded.companyId;
+        socket.data.widgetInstallationId =
+          decoded.widgetInstallationId;
+        socket.data.conversationId = decoded.conversationId;
+        socket.data.customerId = decoded.customerId;
+
+        return next();
+      }
+
+      if (!decoded.userId || !decoded.companyId || !decoded.role) {
+        return next(new Error("Invalid token"));
+      }
+
+      socket.data.authType = "agent";
       socket.data.userId = decoded.userId;
       socket.data.companyId = decoded.companyId;
       socket.data.role = decoded.role;
@@ -42,13 +130,23 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
   });
 
   io.on("connection", (socket) => {
-    const { companyId } = socket.data as SocketUser;
+    const socketData = socket.data as SocketData;
+    const { companyId } = socketData;
 
-    // Auto-join company room so tenant-scoped broadcasts reach this socket.
-    void socket.join(`company:${companyId}`);
+    if (socketData.authType === "agent") {
+      // Agent sockets receive tenant-scoped broadcasts through their company room.
+      void socket.join(`company:${companyId}`);
+    }
 
     const isAuthorizedConversation = async (conversationId: string) => {
       if (!conversationId) {
+        return false;
+      }
+
+      if (
+        socketData.authType === "widget" &&
+        socketData.conversationId !== conversationId
+      ) {
         return false;
       }
 
@@ -56,6 +154,12 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
         where: {
           id: conversationId,
           companyId,
+          ...(socketData.authType === "widget"
+            ? {
+                customerId: socketData.customerId,
+                channel: ConversationChannel.WEBSITE,
+              }
+            : {}),
         },
         select: {
           id: true,

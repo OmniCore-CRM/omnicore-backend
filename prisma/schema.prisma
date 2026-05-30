@@ -48,6 +48,7 @@ model Company {
   customers Customer[]
   conversations Conversation[]
   messages Message[]
+  widgetInstallations WidgetInstallation[]
 }
 
 model User {
@@ -138,4 +139,20 @@ model Message {
   @@index([companyId])
   @@index([conversationId])
   @@index([companyId, provider, externalMessageId])
+}
+
+model WidgetInstallation {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  publicKey      String   @unique
+  enabled        Boolean  @default(true)
+  allowedDomains String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
