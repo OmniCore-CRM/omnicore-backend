@@ -15,7 +15,14 @@ const app = express();
 // Security middleware
 app.use(
   cors({
-    origin: env.APP_ORIGINS,
+    origin: (origin, callback) => {
+      const allowedOrigins = env.APP_ORIGINS;
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
 }));
 
