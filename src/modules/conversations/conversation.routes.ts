@@ -5,6 +5,8 @@ import { ConversationController } from "./conversation.controller.js";
 import { createConversationSchema } from "./conversation.validation.js";
 import { MessageController } from "@/modules/messages/message.controller.js";
 import { createMessageSchema } from "@/modules/messages/message.validation.js";
+import { TicketController } from "@/modules/tickets/ticket.controller.js";
+import { createConversationTicketSchema } from "@/modules/tickets/ticket.validation.js";
 
 const router = Router();
 
@@ -56,6 +58,13 @@ router.post(
   },
   validateRequest(createMessageSchema),
   MessageController.createMessage
+);
+
+router.post(
+  "/:id/tickets",
+  protect,
+  validateRequest(createConversationTicketSchema),
+  TicketController.createTicketFromConversation
 );
 
 export default router;

@@ -5,6 +5,7 @@ import conversationRoutes from "@/modules/conversations/conversation.routes.js";
 import messageRoutes from "@/modules/messages/message.routes.js";
 import widgetRoutes from "@/modules/widget/widget.routes.js";
 import channelRoutes from "@/modules/channels/channel.routes.js";
+import ticketRoutes from "@/modules/tickets/ticket.routes.js";
 
 const router = Router();
 
@@ -19,6 +20,9 @@ router.use("/conversations", conversationRoutes);
 
 // Message routes
 router.use("/messages", messageRoutes);
+
+// Ticket routes
+router.use("/tickets", ticketRoutes);
 
 // Widget routes
 router.use("/widget", widgetRoutes);
