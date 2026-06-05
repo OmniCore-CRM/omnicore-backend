@@ -79,6 +79,7 @@ model Company {
   tickets Ticket[]
   ticketNotes TicketNote[]
   ticketActivities TicketActivity[]
+  savedReplies SavedReply[]
 }
 
 model User {
@@ -101,6 +102,7 @@ model User {
   createdTickets Ticket[] @relation("TicketCreator")
   ticketNotes TicketNote[] @relation("TicketNoteAuthor")
   ticketActivities TicketActivity[] @relation("TicketActivityActor")
+  savedReplies SavedReply[] @relation("SavedReplyCreator")
 }
 
 model Customer {
@@ -274,4 +276,24 @@ model TicketActivity {
   @@index([ticketId])
   @@index([actorId])
   @@index([action])
+}
+
+model SavedReply {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  title   String
+  content String
+
+  createdById String
+  createdBy   User @relation("SavedReplyCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([createdById])
+  @@index([companyId, title])
 }
