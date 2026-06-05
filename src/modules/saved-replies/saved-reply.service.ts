@@ -1,0 +1,149 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/config/db.js";
+import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import { AppError } from "@/core/errors/app-error.js";
+import {
+  mapSavedReply,
+  mapSavedReplies,
+} from "./saved-reply.mapper.js";
+import type {
+  CreateSavedReplyInput,
+  SavedReplyListQueryInput,
+  UpdateSavedReplyInput,
+} from "./saved-reply.validation.js";
+
+const savedReplyInclude = {
+  createdBy: true,
+} satisfies Prisma.SavedReplyInclude;
+
+type UserContext = {
+  userId: string;
+  companyId: string;
+  role: string;
+};
+
+const assertCanMutate = (user: UserContext) => {
+  if (user.role === "VIEWER") {
+    throw new AppError(
+      "Saved reply changes are not allowed for viewer users",
+      HTTP_STATUS.FORBIDDEN
+    );
+  }
+};
+
+export class SavedReplyService {
+  static async getSavedReplies(
+    companyId: string,
+    query: SavedReplyListQueryInput
+  ) {
+    const search = query.search?.trim();
+    const where: Prisma.SavedReplyWhereInput = {
+      companyId,
+      ...(search
+        ? {
+            OR: [
+              {
+                title: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+              {
+                content: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const replies = await prisma.savedReply.findMany({
+      where,
+      include: savedReplyInclude,
+      orderBy: [
+        {
+          updatedAt: "desc",
+        },
+        {
+          id: "desc",
+        },
+      ],
+    });
+
+    return mapSavedReplies(replies);
+  }
+
+  static async createSavedReply(
+    user: UserContext,
+    data: CreateSavedReplyInput
+  ) {
+    assertCanMutate(user);
+
+    const reply = await prisma.savedReply.create({
+      data: {
+        companyId: user.companyId,
+        createdById: user.userId,
+        title: data.title,
+        content: data.content,
+      },
+      include: savedReplyInclude,
+    });
+
+    return mapSavedReply(reply);
+  }
+
+  static async updateSavedReply(
+    user: UserContext,
+    replyId: string,
+    data: UpdateSavedReplyInput
+  ) {
+    assertCanMutate(user);
+
+    const existing = await prisma.savedReply.findFirst({
+      where: {
+        id: replyId,
+        companyId: user.companyId,
+      },
+    });
+
+    if (!existing) {
+      throw new AppError("Saved reply not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    const reply = await prisma.savedReply.update({
+      where: {
+        id: replyId,
+      },
+      data,
+      include: savedReplyInclude,
+    });
+
+    return mapSavedReply(reply);
+  }
+
+  static async deleteSavedReply(user: UserContext, replyId: string) {
+    assertCanMutate(user);
+
+    const existing = await prisma.savedReply.findFirst({
+      where: {
+        id: replyId,
+        companyId: user.companyId,
+      },
+      include: savedReplyInclude,
+    });
+
+    if (!existing) {
+      throw new AppError("Saved reply not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    await prisma.savedReply.delete({
+      where: {
+        id: replyId,
+      },
+    });
+
+    return mapSavedReply(existing);
+  }
+}

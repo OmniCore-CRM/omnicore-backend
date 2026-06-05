@@ -7,6 +7,7 @@ import widgetRoutes from "@/modules/widget/widget.routes.js";
 import channelRoutes from "@/modules/channels/channel.routes.js";
 import ticketRoutes from "@/modules/tickets/ticket.routes.js";
 import userRoutes from "@/modules/users/user.routes.js";
+import savedReplyRoutes from "@/modules/saved-replies/saved-reply.routes.js";
 
 const router = Router();
 
@@ -27,6 +28,9 @@ router.use("/messages", messageRoutes);
 
 // Ticket routes
 router.use("/tickets", ticketRoutes);
+
+// Saved reply routes
+router.use("/saved-replies", savedReplyRoutes);
 
 // Widget routes
 router.use("/widget", widgetRoutes);
