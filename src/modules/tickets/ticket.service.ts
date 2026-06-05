@@ -1,4 +1,8 @@
-import { TicketActivityAction, type Prisma } from "@prisma/client";
+import {
+  TicketActivityAction,
+  TicketStatus,
+  type Prisma,
+} from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
@@ -27,6 +31,21 @@ const ticketInclude = {
 
 const ticketDetailInclude = {
   ...ticketInclude,
+  conversation: {
+    include: {
+      messages: {
+        orderBy: [
+          {
+            createdAt: "desc",
+          },
+          {
+            id: "desc",
+          },
+        ],
+        take: 50,
+      },
+    },
+  },
   notes: {
     include: {
       author: true,
@@ -59,6 +78,28 @@ type UserContext = {
 const assertCanMutate = (user: UserContext) => {
   if (user.role === "VIEWER") {
     throw viewerMutationError;
+  }
+};
+
+const allowedStatusTransitions: Record<TicketStatus, TicketStatus[]> = {
+  [TicketStatus.OPEN]: [TicketStatus.PENDING, TicketStatus.ESCALATED],
+  [TicketStatus.PENDING]: [TicketStatus.OPEN, TicketStatus.RESOLVED],
+  [TicketStatus.ESCALATED]: [TicketStatus.PENDING, TicketStatus.RESOLVED],
+  [TicketStatus.RESOLVED]: [TicketStatus.CLOSED],
+  [TicketStatus.CLOSED]: [],
+};
+
+const assertValidStatusTransition = (
+  from: TicketStatus,
+  to: TicketStatus
+) => {
+  if (from === to) return;
+
+  if (!allowedStatusTransitions[from].includes(to)) {
+    throw new AppError(
+      `Invalid ticket status transition from ${from} to ${to}`,
+      HTTP_STATUS.BAD_REQUEST
+    );
   }
 };
 
@@ -342,6 +383,10 @@ export class TicketService {
 
     if (!existing) {
       throw new AppError("Ticket not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (data.status !== undefined) {
+      assertValidStatusTransition(existing.status, data.status);
     }
 
     const links = await this.resolveTicketLinks(user.companyId, {
