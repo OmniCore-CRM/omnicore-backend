@@ -2,6 +2,7 @@ import { Router } from "express";
 import { protect } from "@/core/middleware/auth.middleware.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { TicketController } from "./ticket.controller.js";
+import { TagController } from "@/modules/tags/tag.controller.js";
 import {
   createTicketNoteSchema,
   createTicketSchema,
@@ -37,6 +38,14 @@ router.patch(
   protect,
   validateRequest(updateTicketSchema),
   TicketController.updateTicket
+);
+
+router.post("/:id/tags", protect, TagController.attachTicketTag);
+
+router.delete(
+  "/:id/tags/:tagId",
+  protect,
+  TagController.removeTicketTag
 );
 
 export default router;

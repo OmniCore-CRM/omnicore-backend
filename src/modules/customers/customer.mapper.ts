@@ -4,7 +4,9 @@ import {
   TicketStatus,
   type Conversation,
   type Customer,
+  type CustomerTag,
   type Message,
+  type Tag,
   type Ticket,
   type TicketActivity,
   type TicketNote,
@@ -13,12 +15,18 @@ import {
 
 type ConversationWithMessages = Conversation & {
   messages?: Message[];
+  tags?: TagLink[];
 };
 
 type TicketWithRelations = Ticket & {
   assignee?: User | null;
   activities?: TicketActivityWithActor[];
   notes?: TicketNoteWithAuthor[];
+  tags?: TagLink[];
+};
+
+type TagLink = {
+  tag: Tag;
 };
 
 type TicketActivityWithActor = TicketActivity & {
@@ -32,6 +40,7 @@ type TicketNoteWithAuthor = TicketNote & {
 type CustomerDetail = Customer & {
   conversations?: ConversationWithMessages[];
   tickets?: TicketWithRelations[];
+  tags?: (CustomerTag & TagLink)[];
 };
 
 type TimelineItem = {
@@ -70,6 +79,18 @@ const mapUserSummary = (user?: User | null) => {
     displayName: [user.firstName, user.lastName].filter(Boolean).join(" "),
   };
 };
+
+const mapTag = (tag: Tag) => ({
+  id: tag.id,
+  companyId: tag.companyId,
+  name: tag.name,
+  color: tag.color,
+  createdAt: tag.createdAt,
+  updatedAt: tag.updatedAt,
+});
+
+const mapTagLinks = (links: TagLink[] = []) =>
+  links.map((link) => mapTag(link.tag));
 
 const latestMessage = (messages: Message[] = []) =>
   [...messages].sort(
@@ -110,6 +131,7 @@ const mapConversationSummary = (conversation: ConversationWithMessages) => {
     lastMessageAt: lastMessage?.createdAt ?? null,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    tags: mapTagLinks(conversation.tags),
   };
 };
 
@@ -125,6 +147,7 @@ const mapTicketSummary = (ticket: TicketWithRelations) => ({
   customerId: ticket.customerId,
   createdAt: ticket.createdAt,
   updatedAt: ticket.updatedAt,
+  tags: mapTagLinks(ticket.tags),
 });
 
 const buildTimeline = (customer: CustomerDetail) => {
@@ -249,6 +272,7 @@ export const mapCustomer = (customer: Customer) => {
 
     createdAt: customer.createdAt,
     updatedAt: customer.updatedAt,
+    tags: mapTagLinks((customer as CustomerDetail).tags),
   };
 };
 

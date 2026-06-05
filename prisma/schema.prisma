@@ -80,6 +80,10 @@ model Company {
   ticketNotes TicketNote[]
   ticketActivities TicketActivity[]
   savedReplies SavedReply[]
+  tags Tag[]
+  customerTags CustomerTag[]
+  conversationTags ConversationTag[]
+  ticketTags TicketTag[]
 }
 
 model User {
@@ -125,6 +129,7 @@ model Customer {
   // Customer communication history
   conversations Conversation[]
   tickets Ticket[]
+  tags CustomerTag[]
 }
 
 model Conversation {
@@ -146,6 +151,7 @@ model Conversation {
 
   messages Message[]
   tickets Ticket[]
+  tags ConversationTag[]
 
   @@index([companyId])
   @@index([customerId])
@@ -225,6 +231,7 @@ model Ticket {
 
   notes TicketNote[]
   activities TicketActivity[]
+  tags TicketTag[]
 
   @@index([companyId])
   @@index([conversationId])
@@ -296,4 +303,75 @@ model SavedReply {
   @@index([companyId])
   @@index([createdById])
   @@index([companyId, title])
+}
+
+model Tag {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name  String
+  color String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customers CustomerTag[]
+  conversations ConversationTag[]
+  tickets TicketTag[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model CustomerTag {
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  tagId String
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([customerId, tagId])
+  @@index([companyId])
+  @@index([tagId])
+}
+
+model ConversationTag {
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  tagId String
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([conversationId, tagId])
+  @@index([companyId])
+  @@index([tagId])
+}
+
+model TicketTag {
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  tagId String
+  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([ticketId, tagId])
+  @@index([companyId])
+  @@index([tagId])
 }

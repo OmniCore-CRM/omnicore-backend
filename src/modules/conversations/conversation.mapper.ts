@@ -1,10 +1,26 @@
-import type { Conversation, Customer, Message } from "@prisma/client";
+import type {
+  Conversation,
+  ConversationTag,
+  Customer,
+  Message,
+  Tag,
+} from "@prisma/client";
 
 // Conversation payload with related entities
 type ConversationWithRelations = Conversation & {
   customer: Customer;
   messages?: Message[];
+  tags?: (ConversationTag & { tag: Tag })[];
 };
+
+const mapTag = (tag: Tag) => ({
+  id: tag.id,
+  companyId: tag.companyId,
+  name: tag.name,
+  color: tag.color,
+  createdAt: tag.createdAt,
+  updatedAt: tag.updatedAt,
+});
 
 // Normalize single conversation response
 export const mapConversation = (
@@ -43,6 +59,7 @@ export const mapConversation = (
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
     })) ?? [],
+    tags: conversation.tags?.map((link) => mapTag(link.tag)) ?? [],
   };
 };
 

@@ -27,6 +27,14 @@ const ticketInclude = {
   createdBy: true,
   customer: true,
   conversation: true,
+  tags: {
+    include: {
+      tag: true,
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  },
 } satisfies Prisma.TicketInclude;
 
 const ticketDetailInclude = {
@@ -224,7 +232,7 @@ export class TicketService {
       assigneeId: data.assigneeId ?? undefined,
     });
 
-    const ticket = await prisma.$transaction(async (tx) => {
+    const createdTicketId = await prisma.$transaction(async (tx) => {
       const created = await tx.ticket.create({
         data: {
           companyId: user.companyId,
@@ -237,7 +245,12 @@ export class TicketService {
           conversationId: links.conversationId,
           assigneeId: links.assigneeId,
         },
-        include: ticketInclude,
+        select: {
+          id: true,
+          status: true,
+          priority: true,
+          assigneeId: true,
+        },
       });
 
       await tx.ticketActivity.create({
@@ -268,8 +281,10 @@ export class TicketService {
         });
       }
 
-      return created;
+      return created.id;
     });
+
+    const ticket = await this.findTicketForList(user.companyId, createdTicketId);
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_created", dto);
@@ -308,7 +323,7 @@ export class TicketService {
       assigneeId: data.assigneeId ?? undefined,
     });
 
-    const ticket = await prisma.$transaction(async (tx) => {
+    const updatedTicketId = await prisma.$transaction(async (tx) => {
       const created = await tx.ticket.create({
         data: {
           companyId: user.companyId,
@@ -320,7 +335,12 @@ export class TicketService {
           conversationId: links.conversationId,
           assigneeId: links.assigneeId,
         },
-        include: ticketInclude,
+        select: {
+          id: true,
+          priority: true,
+          assigneeId: true,
+          customerId: true,
+        },
       });
 
       await tx.ticketActivity.create({
@@ -352,8 +372,10 @@ export class TicketService {
         });
       }
 
-      return created;
+      return created.id;
     });
+
+    const ticket = await this.findTicketForList(user.companyId, updatedTicketId);
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_created", dto);
@@ -393,7 +415,7 @@ export class TicketService {
       assigneeId: data.assigneeId ?? undefined,
     });
 
-    const ticket = await prisma.$transaction(async (tx) => {
+    const updatedTicketId = await prisma.$transaction(async (tx) => {
       const updated = await tx.ticket.update({
         where: {
           id: existing.id,
@@ -413,7 +435,9 @@ export class TicketService {
             ? { assigneeId: links.assigneeId }
             : {}),
         },
-        include: ticketInclude,
+        select: {
+          id: true,
+        },
       });
 
       const activities: Prisma.TicketActivityCreateManyInput[] = [];
@@ -484,8 +508,10 @@ export class TicketService {
         });
       }
 
-      return updated;
+      return updated.id;
     });
+
+    const ticket = await this.findTicketForList(user.companyId, updatedTicketId);
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
@@ -676,5 +702,21 @@ export class TicketService {
     if (!ticket) {
       throw new AppError("Ticket not found", HTTP_STATUS.NOT_FOUND);
     }
+  }
+
+  private static async findTicketForList(companyId: string, ticketId: string) {
+    const ticket = await prisma.ticket.findFirst({
+      where: {
+        id: ticketId,
+        companyId,
+      },
+      include: ticketInclude,
+    });
+
+    if (!ticket) {
+      throw new AppError("Ticket not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return ticket;
   }
 }

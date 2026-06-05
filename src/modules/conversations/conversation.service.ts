@@ -55,6 +55,14 @@ export class ConversationService {
 
       include: {
         customer: true,
+        tags: {
+          include: {
+            tag: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
       },
     });
 
@@ -116,6 +124,14 @@ export class ConversationService {
 
       include: {
         customer: true,
+        tags: {
+          include: {
+            tag: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
       },
 
       orderBy: [
@@ -160,6 +176,14 @@ export class ConversationService {
 
       include: {
         customer: true,
+        tags: {
+          include: {
+            tag: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
 
         messages: {
           orderBy: [

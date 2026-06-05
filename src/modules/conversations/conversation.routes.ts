@@ -7,6 +7,7 @@ import { MessageController } from "@/modules/messages/message.controller.js";
 import { createMessageSchema } from "@/modules/messages/message.validation.js";
 import { TicketController } from "@/modules/tickets/ticket.controller.js";
 import { createConversationTicketSchema } from "@/modules/tickets/ticket.validation.js";
+import { TagController } from "@/modules/tags/tag.controller.js";
 
 const router = Router();
 
@@ -65,6 +66,14 @@ router.post(
   protect,
   validateRequest(createConversationTicketSchema),
   TicketController.createTicketFromConversation
+);
+
+router.post("/:id/tags", protect, TagController.attachConversationTag);
+
+router.delete(
+  "/:id/tags/:tagId",
+  protect,
+  TagController.removeConversationTag
 );
 
 export default router;

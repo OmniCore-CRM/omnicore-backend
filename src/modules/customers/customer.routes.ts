@@ -3,6 +3,7 @@ import { protect } from "@/core/middleware/auth.middleware.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { CustomerController } from "./customer.controller.js";
 import { createCustomerSchema } from "./customer.validation.js";
+import { TagController } from "@/modules/tags/tag.controller.js";
 
 const router = Router();
 
@@ -26,6 +27,14 @@ router.get(
   "/:id",
   protect,
   CustomerController.getCustomerById
+);
+
+router.post("/:id/tags", protect, TagController.attachCustomerTag);
+
+router.delete(
+  "/:id/tags/:tagId",
+  protect,
+  TagController.removeCustomerTag
 );
 
 export default router;

@@ -79,6 +79,16 @@ export class CustomerService {
 
     const customers = await prisma.customer.findMany({
       where,
+      include: {
+        tags: {
+          include: {
+            tag: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
 
       orderBy: [
         {
@@ -123,6 +133,14 @@ export class CustomerService {
       include: {
         conversations: {
           include: {
+            tags: {
+              include: {
+                tag: true,
+              },
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
             messages: {
               orderBy: [
                 {
@@ -147,6 +165,14 @@ export class CustomerService {
         tickets: {
           include: {
             assignee: true,
+            tags: {
+              include: {
+                tag: true,
+              },
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
             activities: {
               include: {
                 actor: true,
@@ -172,6 +198,14 @@ export class CustomerService {
               id: "desc",
             },
           ],
+        },
+        tags: {
+          include: {
+            tag: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
         },
       },
     });
