@@ -1,17 +1,23 @@
 import type {
   Conversation,
   Customer,
+  Message,
+  MessageSender,
   Ticket,
   TicketActivity,
   TicketNote,
   User,
 } from "@prisma/client";
 
+type ConversationWithMessages = Conversation & {
+  messages?: Message[];
+};
+
 type TicketWithRelations = Ticket & {
   assignee?: User | null;
   createdBy: User;
   customer?: Customer | null;
-  conversation?: Conversation | null;
+  conversation?: ConversationWithMessages | null;
   notes?: TicketNoteWithAuthor[];
   activities?: TicketActivityWithActor[];
 };
@@ -51,15 +57,97 @@ const mapCustomerSummary = (customer?: Customer | null) => {
   };
 };
 
+const mapMessageSummary = (message?: Message | null) => {
+  if (!message) return null;
+
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    content: message.content,
+    sender: message.sender,
+    status: message.status,
+    provider: message.provider,
+    externalMessageId: message.externalMessageId,
+    createdAt: message.createdAt,
+    updatedAt: message.updatedAt,
+  };
+};
+
+const getLatestMessageBySender = (
+  messages: Message[],
+  sender: MessageSender
+) => messages.find((message) => message.sender === sender) ?? null;
+
+const minutesBetween = (from: Date, to: Date) =>
+  Math.max(0, Math.round((to.getTime() - from.getTime()) / 60000));
+
+const readMetadataString = (metadata: unknown, key: string) => {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : null;
+};
+
+const mapTicketMetrics = (ticket: TicketWithRelations) => {
+  const messages = [...(ticket.conversation?.messages ?? [])].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+  );
+  const activities = [...(ticket.activities ?? [])].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+  );
+  const firstAgentReply =
+    messages.find(
+      (message) =>
+        message.sender === "AGENT" &&
+        message.createdAt.getTime() >= ticket.createdAt.getTime()
+    ) ?? null;
+  const resolvedActivity =
+    activities.find(
+      (activity) =>
+        activity.action === "STATUS_CHANGED" &&
+        readMetadataString(activity.metadata, "to") === "RESOLVED"
+    ) ?? null;
+  const resolvedAt =
+    resolvedActivity?.createdAt ??
+    (ticket.status === "RESOLVED" || ticket.status === "CLOSED"
+      ? ticket.updatedAt
+      : null);
+  const endAt = resolvedAt ?? new Date();
+
+  return {
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+    firstResponseAt: firstAgentReply?.createdAt ?? null,
+    firstResponseTimeMinutes: firstAgentReply
+      ? minutesBetween(ticket.createdAt, firstAgentReply.createdAt)
+      : null,
+    resolvedAt,
+    timeOpenMinutes: minutesBetween(ticket.createdAt, endAt),
+  };
+};
+
 const mapConversationSummary = (
-  conversation?: Conversation | null
+  conversation?: ConversationWithMessages | null
 ) => {
   if (!conversation) return null;
+
+  const recentMessages = [...(conversation.messages ?? [])].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+  );
 
   return {
     id: conversation.id,
     customerId: conversation.customerId,
     channel: conversation.channel,
+    latestCustomerMessage: mapMessageSummary(
+      getLatestMessageBySender(recentMessages, "CUSTOMER")
+    ),
+    latestAgentReply: mapMessageSummary(
+      getLatestMessageBySender(recentMessages, "AGENT")
+    ),
+    recentMessages: recentMessages.map(mapMessageSummary).filter(Boolean),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
   };
@@ -82,6 +170,7 @@ export const mapTicket = (ticket: TicketWithRelations) => ({
   conversation: mapConversationSummary(ticket.conversation),
   notes: ticket.notes?.map(mapTicketNote) ?? undefined,
   activities: ticket.activities?.map(mapTicketActivity) ?? undefined,
+  metrics: mapTicketMetrics(ticket),
   createdAt: ticket.createdAt,
   updatedAt: ticket.updatedAt,
 });
