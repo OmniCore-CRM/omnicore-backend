@@ -2,7 +2,11 @@ import { prisma } from "@/config/db.js";
 import type { CreateCustomerInput } from "./customer.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
-import { mapCustomer, mapCustomers } from "./customer.mapper.js";
+import {
+  mapCustomer,
+  mapCustomerDetail,
+  mapCustomers,
+} from "./customer.mapper.js";
 import type { PaginationParams } from "@/core/utils/pagination.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import type { Prisma } from "@prisma/client";
@@ -116,6 +120,60 @@ export class CustomerService {
         // Enforce tenant ownership
         companyId,
       },
+      include: {
+        conversations: {
+          include: {
+            messages: {
+              orderBy: [
+                {
+                  createdAt: "desc",
+                },
+                {
+                  id: "desc",
+                },
+              ],
+              take: 50,
+            },
+          },
+          orderBy: [
+            {
+              updatedAt: "desc",
+            },
+            {
+              id: "desc",
+            },
+          ],
+        },
+        tickets: {
+          include: {
+            assignee: true,
+            activities: {
+              include: {
+                actor: true,
+              },
+              orderBy: {
+                createdAt: "desc",
+              },
+            },
+            notes: {
+              include: {
+                author: true,
+              },
+              orderBy: {
+                createdAt: "desc",
+              },
+            },
+          },
+          orderBy: [
+            {
+              updatedAt: "desc",
+            },
+            {
+              id: "desc",
+            },
+          ],
+        },
+      },
     });
 
     // Prevent access to non-existent or foreign tenant customer
@@ -125,6 +183,6 @@ export class CustomerService {
         HTTP_STATUS.NOT_FOUND
       );
     }
-    return mapCustomer(customer);
+    return mapCustomerDetail(customer);
   }
 }
