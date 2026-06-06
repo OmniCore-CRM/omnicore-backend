@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationChannel } from "@prisma/client";
+import { ConversationChannel, ConversationStatus } from "@prisma/client";
 
 // ===== Create Conversation Validation =====
 export const createConversationSchema = z.object({
@@ -12,4 +12,12 @@ export const createConversationSchema = z.object({
 
 export type CreateConversationInput = z.infer<
   typeof createConversationSchema
+>;
+
+export const updateConversationSchema = z.object({
+  status: z.enum(ConversationStatus),
+});
+
+export type UpdateConversationInput = z.infer<
+  typeof updateConversationSchema
 >;

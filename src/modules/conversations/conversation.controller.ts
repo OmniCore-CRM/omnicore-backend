@@ -7,6 +7,14 @@ import { ConversationService } from "./conversation.service.js";
 import { parsePaginationQuery } from "@/core/utils/pagination.js";
 
 export class ConversationController {
+  private static getUserContext(req: AuthenticatedRequest) {
+    return {
+      userId: req.user!.userId,
+      companyId: req.user!.companyId,
+      role: req.user!.role,
+    };
+  }
+
   // ===== Create tenant-scoped conversation =====
   static createConversation = asyncHandler(
     async (
@@ -51,6 +59,7 @@ export class ConversationController {
         ...pagination,
         search: req.query.search,
         channel: req.query.channel,
+        status: req.query.status,
       }
     );
 
@@ -87,6 +96,39 @@ export class ConversationController {
         statusCode: HTTP_STATUS.OK,
         message: "Conversation retrieved successfully",
         data: conversation,
+      });
+    }
+  );
+
+  static updateConversation = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const conversation = await ConversationService.updateConversation(
+        ConversationController.getUserContext(req),
+        req.params.id as string,
+        req.body
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Conversation updated successfully",
+        data: conversation,
+      });
+    }
+  );
+
+  static getConversationActivity = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const activity = await ConversationService.getConversationActivity(
+        req.user!.companyId,
+        req.params.id as string
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Conversation activity retrieved successfully",
+        data: activity,
       });
     }
   );

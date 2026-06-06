@@ -1,10 +1,54 @@
-import type { Conversation, Customer, Message } from "@prisma/client";
+import type {
+  Conversation,
+  ConversationActivity,
+  ConversationTag,
+  Customer,
+  Message,
+  Tag,
+  User,
+} from "@prisma/client";
 
 // Conversation payload with related entities
 type ConversationWithRelations = Conversation & {
   customer: Customer;
   messages?: Message[];
+  tags?: (ConversationTag & { tag: Tag })[];
+  activities?: ConversationActivityWithActor[];
 };
+
+type ConversationActivityWithActor = ConversationActivity & {
+  actor: User;
+};
+
+const mapTag = (tag: Tag) => ({
+  id: tag.id,
+  companyId: tag.companyId,
+  name: tag.name,
+  color: tag.color,
+  createdAt: tag.createdAt,
+  updatedAt: tag.updatedAt,
+});
+
+const mapUserSummary = (user: User) => ({
+  id: user.id,
+  email: user.email,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  role: user.role,
+  displayName: [user.firstName, user.lastName].filter(Boolean).join(" "),
+});
+
+export const mapConversationActivity = (
+  activity: ConversationActivityWithActor
+) => ({
+  id: activity.id,
+  conversationId: activity.conversationId,
+  actorId: activity.actorId,
+  actor: mapUserSummary(activity.actor),
+  action: activity.action,
+  metadata: activity.metadata,
+  createdAt: activity.createdAt,
+});
 
 // Normalize single conversation response
 export const mapConversation = (
@@ -16,6 +60,7 @@ export const mapConversation = (
     customerId: conversation.customerId,
 
     channel: conversation.channel,
+    status: conversation.status,
 
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
@@ -43,6 +88,8 @@ export const mapConversation = (
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
     })) ?? [],
+    tags: conversation.tags?.map((link) => mapTag(link.tag)) ?? [],
+    activities: conversation.activities?.map(mapConversationActivity),
   };
 };
 

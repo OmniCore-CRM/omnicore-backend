@@ -3,8 +3,10 @@ import type {
   Customer,
   Message,
   MessageSender,
+  Tag,
   Ticket,
   TicketActivity,
+  TicketTag,
   TicketNote,
   User,
 } from "@prisma/client";
@@ -20,6 +22,7 @@ type TicketWithRelations = Ticket & {
   conversation?: ConversationWithMessages | null;
   notes?: TicketNoteWithAuthor[];
   activities?: TicketActivityWithActor[];
+  tags?: (TicketTag & { tag: Tag })[];
 };
 
 type TicketNoteWithAuthor = TicketNote & {
@@ -56,6 +59,15 @@ const mapCustomerSummary = (customer?: Customer | null) => {
     phone: customer.phone,
   };
 };
+
+const mapTag = (tag: Tag) => ({
+  id: tag.id,
+  companyId: tag.companyId,
+  name: tag.name,
+  color: tag.color,
+  createdAt: tag.createdAt,
+  updatedAt: tag.updatedAt,
+});
 
 const mapMessageSummary = (message?: Message | null) => {
   if (!message) return null;
@@ -170,6 +182,7 @@ export const mapTicket = (ticket: TicketWithRelations) => ({
   conversation: mapConversationSummary(ticket.conversation),
   notes: ticket.notes?.map(mapTicketNote) ?? undefined,
   activities: ticket.activities?.map(mapTicketActivity) ?? undefined,
+  tags: ticket.tags?.map((link) => mapTag(link.tag)) ?? [],
   metrics: mapTicketMetrics(ticket),
   createdAt: ticket.createdAt,
   updatedAt: ticket.updatedAt,
