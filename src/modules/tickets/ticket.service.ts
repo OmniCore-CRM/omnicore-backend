@@ -24,6 +24,7 @@ import type {
 
 const ticketInclude = {
   assignee: true,
+  team: true,
   createdBy: true,
   customer: true,
   conversation: true,

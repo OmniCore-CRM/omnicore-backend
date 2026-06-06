@@ -8,6 +8,7 @@ import type {
   TicketActivity,
   TicketTag,
   TicketNote,
+  Team,
   User,
 } from "@prisma/client";
 
@@ -23,6 +24,7 @@ type TicketWithRelations = Ticket & {
   notes?: TicketNoteWithAuthor[];
   activities?: TicketActivityWithActor[];
   tags?: (TicketTag & { tag: Tag })[];
+  team?: Team | null;
 };
 
 type TicketNoteWithAuthor = TicketNote & {
@@ -174,6 +176,14 @@ export const mapTicket = (ticket: TicketWithRelations) => ({
   priority: ticket.priority,
   assigneeId: ticket.assigneeId,
   assignee: mapUserSummary(ticket.assignee),
+  teamId: ticket.teamId,
+  team: ticket.team
+    ? {
+        id: ticket.team.id,
+        name: ticket.team.name,
+        description: ticket.team.description,
+      }
+    : null,
   createdById: ticket.createdById,
   createdBy: mapUserSummary(ticket.createdBy),
   customerId: ticket.customerId,

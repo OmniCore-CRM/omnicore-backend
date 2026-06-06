@@ -5,6 +5,7 @@ import type {
   Customer,
   Message,
   Tag,
+  Team,
   User,
 } from "@prisma/client";
 
@@ -14,6 +15,7 @@ type ConversationWithRelations = Conversation & {
   messages?: Message[];
   tags?: (ConversationTag & { tag: Tag })[];
   activities?: ConversationActivityWithActor[];
+  team?: Team | null;
 };
 
 type ConversationActivityWithActor = ConversationActivity & {
@@ -61,6 +63,14 @@ export const mapConversation = (
 
     channel: conversation.channel,
     status: conversation.status,
+    teamId: conversation.teamId,
+    team: conversation.team
+      ? {
+          id: conversation.team.id,
+          name: conversation.team.name,
+          description: conversation.team.description,
+        }
+      : null,
 
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,

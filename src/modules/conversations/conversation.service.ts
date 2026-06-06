@@ -93,6 +93,7 @@ export class ConversationService {
 
       include: {
         customer: true,
+        team: true,
         tags: {
           include: {
             tag: true,
@@ -166,6 +167,7 @@ export class ConversationService {
 
       include: {
         customer: true,
+        team: true,
         tags: {
           include: {
             tag: true,
@@ -218,6 +220,7 @@ export class ConversationService {
 
       include: {
         customer: true,
+        team: true,
         tags: {
           include: {
             tag: true,

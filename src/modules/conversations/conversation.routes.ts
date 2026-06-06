@@ -11,6 +11,8 @@ import { createMessageSchema } from "@/modules/messages/message.validation.js";
 import { TicketController } from "@/modules/tickets/ticket.controller.js";
 import { createConversationTicketSchema } from "@/modules/tickets/ticket.validation.js";
 import { TagController } from "@/modules/tags/tag.controller.js";
+import { TeamController } from "@/modules/teams/team.controller.js";
+import { assignTeamSchema } from "@/modules/teams/team.validation.js";
 
 const router = Router();
 
@@ -41,6 +43,13 @@ router.patch(
   protect,
   validateRequest(updateConversationSchema),
   ConversationController.updateConversation
+);
+
+router.post(
+  "/:id/team",
+  protect,
+  validateRequest(assignTeamSchema),
+  TeamController.assignConversation
 );
 
 router.get(
