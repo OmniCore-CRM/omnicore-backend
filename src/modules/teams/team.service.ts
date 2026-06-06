@@ -1,0 +1,182 @@
+import {
+  ConversationActivityAction,
+  TicketActivityAction,
+  type Prisma,
+} from "@prisma/client";
+import { prisma } from "@/config/db.js";
+import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import { AppError } from "@/core/errors/app-error.js";
+import { getIO } from "@/socket/socket.server.js";
+import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
+import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
+import { mapTeam, mapTeams } from "./team.mapper.js";
+import type {
+  AssignTeamInput,
+  CreateTeamInput,
+  UpdateTeamInput,
+} from "./team.validation.js";
+
+type UserContext = { userId: string; companyId: string; role: string };
+
+const managementRoles = new Set(["OWNER", "ADMIN", "TEAM_LEAD"]);
+const assertCanManageTeams = (user: UserContext) => {
+  if (!managementRoles.has(user.role)) {
+    throw new AppError("Team management is not allowed", HTTP_STATUS.FORBIDDEN);
+  }
+};
+const assertCanAssign = (user: UserContext) => {
+  if (user.role === "VIEWER") {
+    throw new AppError("Team assignment is not allowed", HTTP_STATUS.FORBIDDEN);
+  }
+};
+
+const teamInclude = {
+  members: { include: { user: true }, orderBy: { createdAt: "asc" } },
+  _count: { select: { tickets: true, conversations: true } },
+  tickets: {
+    where: { status: { in: ["OPEN", "PENDING", "ESCALATED"] } },
+    select: { status: true },
+  },
+  conversations: {
+    where: { status: { in: ["OPEN", "PENDING", "SNOOZED"] } },
+    select: { status: true },
+  },
+} satisfies Prisma.TeamInclude;
+
+export class TeamService {
+  static async list(companyId: string) {
+    const teams = await prisma.team.findMany({
+      where: { companyId },
+      include: teamInclude,
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+    return mapTeams(teams);
+  }
+
+  static async create(user: UserContext, data: CreateTeamInput) {
+    assertCanManageTeams(user);
+    const team = await prisma.team.create({
+      data: { companyId: user.companyId, ...data },
+      include: teamInclude,
+    });
+    return mapTeam(team);
+  }
+
+  static async update(user: UserContext, teamId: string, data: UpdateTeamInput) {
+    assertCanManageTeams(user);
+    await this.assertTeam(user.companyId, teamId);
+    const team = await prisma.team.update({
+      where: { id: teamId },
+      data,
+      include: teamInclude,
+    });
+    return mapTeam(team);
+  }
+
+  static async remove(user: UserContext, teamId: string) {
+    assertCanManageTeams(user);
+    await this.assertTeam(user.companyId, teamId);
+    await prisma.team.delete({ where: { id: teamId } });
+    return { id: teamId };
+  }
+
+  static async addMember(user: UserContext, teamId: string, memberId: string) {
+    assertCanManageTeams(user);
+    await this.assertTeam(user.companyId, teamId);
+    const member = await prisma.user.findFirst({
+      where: { id: memberId, companyId: user.companyId },
+      select: { id: true },
+    });
+    if (!member) throw new AppError("User not found", HTTP_STATUS.NOT_FOUND);
+    await prisma.teamMember.upsert({
+      where: { teamId_userId: { teamId, userId: memberId } },
+      update: {},
+      create: { teamId, userId: memberId, companyId: user.companyId },
+    });
+    return this.get(user.companyId, teamId);
+  }
+
+  static async removeMember(user: UserContext, teamId: string, memberId: string) {
+    assertCanManageTeams(user);
+    await this.assertTeam(user.companyId, teamId);
+    await prisma.teamMember.deleteMany({
+      where: { teamId, userId: memberId, companyId: user.companyId },
+    });
+    return this.get(user.companyId, teamId);
+  }
+
+  static async assignTicket(user: UserContext, ticketId: string, data: AssignTeamInput) {
+    assertCanAssign(user);
+    const existing = await prisma.ticket.findFirst({
+      where: { id: ticketId, companyId: user.companyId },
+      select: { id: true, teamId: true },
+    });
+    if (!existing) throw new AppError("Ticket not found", HTTP_STATUS.NOT_FOUND);
+    if (data.teamId) await this.assertTeam(user.companyId, data.teamId);
+    const changed = existing.teamId !== data.teamId;
+    if (changed) {
+      await prisma.$transaction([
+        prisma.ticket.update({ where: { id: ticketId }, data: { teamId: data.teamId } }),
+        prisma.ticketActivity.create({
+          data: {
+            companyId: user.companyId,
+            ticketId,
+            actorId: user.userId,
+            action: data.teamId ? TicketActivityAction.TEAM_ASSIGNED : TicketActivityAction.TEAM_UNASSIGNED,
+            metadata: { from: existing.teamId, to: data.teamId },
+          },
+        }),
+      ]);
+    }
+    const ticket = await prisma.ticket.findFirst({
+      where: { id: ticketId, companyId: user.companyId },
+      include: { assignee: true, createdBy: true, customer: true, conversation: true, team: true, tags: { include: { tag: true } } },
+    });
+    const dto = mapTicket(ticket!);
+    if (changed) getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
+    return dto;
+  }
+
+  static async assignConversation(user: UserContext, conversationId: string, data: AssignTeamInput) {
+    assertCanAssign(user);
+    const existing = await prisma.conversation.findFirst({
+      where: { id: conversationId, companyId: user.companyId },
+      select: { id: true, teamId: true },
+    });
+    if (!existing) throw new AppError("Conversation not found", HTTP_STATUS.NOT_FOUND);
+    if (data.teamId) await this.assertTeam(user.companyId, data.teamId);
+    const changed = existing.teamId !== data.teamId;
+    if (changed) {
+      await prisma.$transaction([
+        prisma.conversation.update({ where: { id: conversationId }, data: { teamId: data.teamId } }),
+        prisma.conversationActivity.create({
+          data: {
+            companyId: user.companyId,
+            conversationId,
+            actorId: user.userId,
+            action: data.teamId ? ConversationActivityAction.TEAM_ASSIGNED : ConversationActivityAction.TEAM_UNASSIGNED,
+            metadata: { from: existing.teamId, to: data.teamId },
+          },
+        }),
+      ]);
+    }
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, companyId: user.companyId },
+      include: { customer: true, team: true, messages: { orderBy: { createdAt: "asc" } }, tags: { include: { tag: true } }, activities: { include: { actor: true }, orderBy: { createdAt: "desc" } } },
+    });
+    const dto = mapConversation(conversation!);
+    if (changed) getIO().to(`company:${user.companyId}`).emit("conversation:updated", dto);
+    return dto;
+  }
+
+  private static async get(companyId: string, teamId: string) {
+    const team = await prisma.team.findFirst({ where: { id: teamId, companyId }, include: teamInclude });
+    if (!team) throw new AppError("Team not found", HTTP_STATUS.NOT_FOUND);
+    return mapTeam(team);
+  }
+
+  private static async assertTeam(companyId: string, teamId: string) {
+    const team = await prisma.team.findFirst({ where: { id: teamId, companyId }, select: { id: true } });
+    if (!team) throw new AppError("Team not found", HTTP_STATUS.NOT_FOUND);
+  }
+}

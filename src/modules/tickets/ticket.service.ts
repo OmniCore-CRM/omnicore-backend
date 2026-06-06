@@ -24,6 +24,7 @@ import type {
 
 const ticketInclude = {
   assignee: true,
+  team: true,
   createdBy: true,
   customer: true,
   conversation: true,
@@ -65,6 +66,14 @@ const ticketDetailInclude = {
   activities: {
     include: {
       actor: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  },
+  attachments: {
+    include: {
+      uploadedBy: true,
     },
     orderBy: {
       createdAt: "desc",

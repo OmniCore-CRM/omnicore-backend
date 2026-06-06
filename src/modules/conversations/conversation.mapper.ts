@@ -5,15 +5,22 @@ import type {
   Customer,
   Message,
   Tag,
+  Team,
   User,
+  Attachment,
 } from "@prisma/client";
+import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 
 // Conversation payload with related entities
 type ConversationWithRelations = Conversation & {
   customer: Customer;
-  messages?: Message[];
+  messages?: (Message & {
+    attachments?: (Attachment & { uploadedBy?: User | null })[];
+  })[];
+  attachments?: (Attachment & { uploadedBy?: User | null })[];
   tags?: (ConversationTag & { tag: Tag })[];
   activities?: ConversationActivityWithActor[];
+  team?: Team | null;
 };
 
 type ConversationActivityWithActor = ConversationActivity & {
@@ -61,6 +68,14 @@ export const mapConversation = (
 
     channel: conversation.channel,
     status: conversation.status,
+    teamId: conversation.teamId,
+    team: conversation.team
+      ? {
+          id: conversation.team.id,
+          name: conversation.team.name,
+          description: conversation.team.description,
+        }
+      : null,
 
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
@@ -84,10 +99,12 @@ export const mapConversation = (
 
       provider: message.provider,
       externalMessageId: message.externalMessageId,
+      attachments: mapAttachments(message.attachments ?? []),
 
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
     })) ?? [],
+    attachments: mapAttachments(conversation.attachments ?? []),
     tags: conversation.tags?.map((link) => mapTag(link.tag)) ?? [],
     activities: conversation.activities?.map(mapConversationActivity),
   };

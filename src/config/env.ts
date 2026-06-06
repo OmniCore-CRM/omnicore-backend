@@ -20,6 +20,8 @@ const envSchema = z.object({
   APP_ORIGINS: z.string().default("http://localhost:3000"),
   SOCKET_ORIGINS: z.string().optional(),
   JSON_BODY_LIMIT: z.string().default("1mb"),
+  ATTACHMENT_STORAGE_DIR: z.string().default("storage/attachments"),
+  ATTACHMENT_MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
 
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
   WHATSAPP_APP_SECRET: z.string().optional(),

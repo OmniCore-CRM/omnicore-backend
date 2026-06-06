@@ -3,11 +3,15 @@ import { protect } from "@/core/middleware/auth.middleware.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { TicketController } from "./ticket.controller.js";
 import { TagController } from "@/modules/tags/tag.controller.js";
+import { TeamController } from "@/modules/teams/team.controller.js";
+import { assignTeamSchema } from "@/modules/teams/team.validation.js";
 import {
   createTicketNoteSchema,
   createTicketSchema,
   updateTicketSchema,
 } from "./ticket.validation.js";
+import { AttachmentController } from "@/modules/attachments/attachment.controller.js";
+import { uploadSingleAttachment } from "@/modules/attachments/attachment.upload.js";
 
 const router = Router();
 
@@ -40,7 +44,21 @@ router.patch(
   TicketController.updateTicket
 );
 
+router.post(
+  "/:id/team",
+  protect,
+  validateRequest(assignTeamSchema),
+  TeamController.assignTicket
+);
+
 router.post("/:id/tags", protect, TagController.attachTicketTag);
+
+router.post(
+  "/:ticketId/attachments",
+  protect,
+  uploadSingleAttachment,
+  AttachmentController.upload
+);
 
 router.delete(
   "/:id/tags/:tagId",

@@ -34,6 +34,7 @@ import {
 } from "./widget.session.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
+import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 
 type RequestOrigin = string | undefined;
 
@@ -165,6 +166,20 @@ export class WidgetService {
     return mapWidgetBootstrap(installation);
   }
 
+  static async authorizeConversationSession(
+    publicKey: string,
+    sessionToken: string,
+    conversationId: string,
+    requestOrigin: RequestOrigin
+  ) {
+    return this.resolveSession(
+      publicKey,
+      sessionToken,
+      conversationId,
+      requestOrigin
+    );
+  }
+
   static async createWidgetConversation(
     data: CreateWidgetConversationInput,
     requestOrigin: RequestOrigin
@@ -293,6 +308,16 @@ export class WidgetService {
         companyId: session.companyId,
         conversationId,
       },
+      include: {
+        attachments: {
+          include: {
+            uploadedBy: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
       orderBy: [
         {
           createdAt: "asc",
@@ -314,9 +339,23 @@ export class WidgetService {
 
     const page = toPaginatedResult(messages, query.limit);
 
+    const attachments = await prisma.attachment.findMany({
+      where: {
+        companyId: session.companyId,
+        conversationId,
+      },
+      include: {
+        uploadedBy: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    });
+
     return {
       ...page,
       items: mapPublicWidgetMessages(page.items),
+      attachments: mapAttachments(attachments),
     };
   }
 

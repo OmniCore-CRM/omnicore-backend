@@ -32,6 +32,8 @@ enum ConversationStatus {
 
 enum ConversationActivityAction {
   STATUS_CHANGED
+  TEAM_ASSIGNED
+  TEAM_UNASSIGNED
 }
 
 enum MessageSender {
@@ -46,6 +48,11 @@ enum MessageStatus {
   DELIVERED
   READ
   FAILED
+}
+
+enum AttachmentUploadedFrom {
+  AGENT
+  CUSTOMER_WIDGET
 }
 
 enum TicketStatus {
@@ -73,53 +80,60 @@ enum TicketActivityAction {
   UNASSIGNED
   NOTE_ADDED
   MESSAGE_RECEIVED_ON_WIDGET
+  TEAM_ASSIGNED
+  TEAM_UNASSIGNED
 }
 
 model Company {
-  id        String    @id @default(cuid())
-  name      String
+  id   String @id @default(cuid())
+  name String
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  users User[]
-  customers Customer[]
-  conversations Conversation[]
-  messages Message[]
-  widgetInstallations WidgetInstallation[]
-  tickets Ticket[]
-  ticketNotes TicketNote[]
-  ticketActivities TicketActivity[]
+  users                  User[]
+  customers              Customer[]
+  conversations          Conversation[]
+  messages               Message[]
+  widgetInstallations    WidgetInstallation[]
+  tickets                Ticket[]
+  ticketNotes            TicketNote[]
+  ticketActivities       TicketActivity[]
   conversationActivities ConversationActivity[]
-  savedReplies SavedReply[]
-  tags Tag[]
-  customerTags CustomerTag[]
-  conversationTags ConversationTag[]
-  ticketTags TicketTag[]
+  savedReplies           SavedReply[]
+  tags                   Tag[]
+  customerTags           CustomerTag[]
+  conversationTags       ConversationTag[]
+  ticketTags             TicketTag[]
+  teams                  Team[]
+  teamMembers            TeamMember[]
+  attachments            Attachment[]
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  passwordHash  String
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
 
-  firstName     String
-  lastName      String
+  firstName String
+  lastName  String
 
   role UserRole @default(AGENT)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  assignedTickets Ticket[] @relation("TicketAssignee")
-  createdTickets Ticket[] @relation("TicketCreator")
-  ticketNotes TicketNote[] @relation("TicketNoteAuthor")
-  ticketActivities TicketActivity[] @relation("TicketActivityActor")
+  assignedTickets        Ticket[]               @relation("TicketAssignee")
+  createdTickets         Ticket[]               @relation("TicketCreator")
+  ticketNotes            TicketNote[]           @relation("TicketNoteAuthor")
+  ticketActivities       TicketActivity[]       @relation("TicketActivityActor")
   conversationActivities ConversationActivity[] @relation("ConversationActivityActor")
-  savedReplies SavedReply[] @relation("SavedReplyCreator")
+  savedReplies           SavedReply[]           @relation("SavedReplyCreator")
+  teamMemberships        TeamMember[]
+  attachments            Attachment[]           @relation("AttachmentUploader")
 }
 
 model Customer {
@@ -136,13 +150,14 @@ model Customer {
   email String?
   phone String?
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Customer communication history
   conversations Conversation[]
-  tickets Ticket[]
-  tags CustomerTag[]
+  tickets       Ticket[]
+  tags          CustomerTag[]
+  attachments   Attachment[]
 }
 
 model Conversation {
@@ -158,19 +173,24 @@ model Conversation {
 
   // Communication channel
   channel ConversationChannel
-  status  ConversationStatus @default(OPEN)
+  status  ConversationStatus  @default(OPEN)
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
-  messages Message[]
-  tickets Ticket[]
-  tags ConversationTag[]
-  activities ConversationActivity[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages    Message[]
+  tickets     Ticket[]
+  tags        ConversationTag[]
+  activities  ConversationActivity[]
+  attachments Attachment[]
 
   @@index([companyId])
   @@index([customerId])
   @@index([status])
+  @@index([teamId])
 }
 
 model ConversationActivity {
@@ -183,9 +203,9 @@ model ConversationActivity {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   actorId String
-  actor   User @relation("ConversationActivityActor", fields: [actorId], references: [id])
+  actor   User   @relation("ConversationActivityActor", fields: [actorId], references: [id])
 
-  action ConversationActivityAction
+  action   ConversationActivityAction
   metadata Json?
 
   createdAt DateTime @default(now())
@@ -213,12 +233,13 @@ model Message {
   // Message content
   content String
 
-  status MessageStatus @default(SENT)
+  status            MessageStatus        @default(SENT)
   externalMessageId String?
-  provider ConversationChannel?
+  provider          ConversationChannel?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  attachments Attachment[]
 
   @@index([companyId])
   @@index([conversationId])
@@ -260,24 +281,102 @@ model Ticket {
   priority TicketPriority @default(MEDIUM)
 
   assigneeId String?
-  assignee   User? @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assignee   User?   @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
   createdById String
-  createdBy   User @relation("TicketCreator", fields: [createdById], references: [id])
+  createdBy   User   @relation("TicketCreator", fields: [createdById], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  notes TicketNote[]
-  activities TicketActivity[]
-  tags TicketTag[]
+  notes       TicketNote[]
+  activities  TicketActivity[]
+  tags        TicketTag[]
+  attachments Attachment[]
 
   @@index([companyId])
   @@index([conversationId])
   @@index([customerId])
   @@index([assigneeId])
+  @@index([teamId])
   @@index([status])
   @@index([priority])
+}
+
+model Attachment {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  uploadedById String?
+  uploadedBy   User?   @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  fileName     String
+  mimeType     String
+  fileSize     Int
+  storageKey   String                 @unique
+  uploadedFrom AttachmentUploadedFrom
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([ticketId])
+  @@index([customerId])
+}
+
+model Team {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       TeamMember[]
+  tickets       Ticket[]
+  conversations Conversation[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model TeamMember {
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([teamId, userId])
+  @@index([companyId])
+  @@index([userId])
 }
 
 model TicketNote {
@@ -290,7 +389,7 @@ model TicketNote {
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   authorId String
-  author   User @relation("TicketNoteAuthor", fields: [authorId], references: [id])
+  author   User   @relation("TicketNoteAuthor", fields: [authorId], references: [id])
 
   content String
 
@@ -311,9 +410,9 @@ model TicketActivity {
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   actorId String
-  actor   User @relation("TicketActivityActor", fields: [actorId], references: [id])
+  actor   User   @relation("TicketActivityActor", fields: [actorId], references: [id])
 
-  action TicketActivityAction
+  action   TicketActivityAction
   metadata Json?
 
   createdAt DateTime @default(now())
@@ -334,7 +433,7 @@ model SavedReply {
   content String
 
   createdById String
-  createdBy   User @relation("SavedReplyCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy   User   @relation("SavedReplyCreator", fields: [createdById], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -356,9 +455,9 @@ model Tag {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  customers CustomerTag[]
+  customers     CustomerTag[]
   conversations ConversationTag[]
-  tickets TicketTag[]
+  tickets       TicketTag[]
 
   @@unique([companyId, name])
   @@index([companyId])
@@ -372,7 +471,7 @@ model CustomerTag {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   tagId String
-  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag   Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
@@ -389,7 +488,7 @@ model ConversationTag {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   tagId String
-  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag   Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
@@ -406,7 +505,7 @@ model TicketTag {
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   tagId String
-  tag   Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag   Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
