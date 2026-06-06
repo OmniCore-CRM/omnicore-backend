@@ -113,7 +113,7 @@ const mapConversationSummary = (conversation: ConversationWithMessages) => {
     id: conversation.id,
     customerId: conversation.customerId,
     channel: conversation.channel,
-    status: "OPEN",
+    status: conversation.status,
     lastMessage: lastMessage
       ? {
           id: lastMessage.id,

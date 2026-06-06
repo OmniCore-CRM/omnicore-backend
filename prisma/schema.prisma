@@ -23,6 +23,17 @@ enum ConversationChannel {
   EMAIL
 }
 
+enum ConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  SNOOZED
+}
+
+enum ConversationActivityAction {
+  STATUS_CHANGED
+}
+
 enum MessageSender {
   CUSTOMER
   AGENT
@@ -79,6 +90,7 @@ model Company {
   tickets Ticket[]
   ticketNotes TicketNote[]
   ticketActivities TicketActivity[]
+  conversationActivities ConversationActivity[]
   savedReplies SavedReply[]
   tags Tag[]
   customerTags CustomerTag[]
@@ -106,6 +118,7 @@ model User {
   createdTickets Ticket[] @relation("TicketCreator")
   ticketNotes TicketNote[] @relation("TicketNoteAuthor")
   ticketActivities TicketActivity[] @relation("TicketActivityActor")
+  conversationActivities ConversationActivity[] @relation("ConversationActivityActor")
   savedReplies SavedReply[] @relation("SavedReplyCreator")
 }
 
@@ -145,6 +158,7 @@ model Conversation {
 
   // Communication channel
   channel ConversationChannel
+  status  ConversationStatus @default(OPEN)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -152,9 +166,34 @@ model Conversation {
   messages Message[]
   tickets Ticket[]
   tags ConversationTag[]
+  activities ConversationActivity[]
 
   @@index([companyId])
   @@index([customerId])
+  @@index([status])
+}
+
+model ConversationActivity {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  actorId String
+  actor   User @relation("ConversationActivityActor", fields: [actorId], references: [id])
+
+  action ConversationActivityAction
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([conversationId])
+  @@index([actorId])
+  @@index([action])
 }
 
 model Message {
