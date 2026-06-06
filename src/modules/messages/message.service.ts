@@ -131,6 +131,16 @@ export class MessageService {
         companyId,
         conversationId,
       },
+      include: {
+        attachments: {
+          include: {
+            uploadedBy: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
 
       orderBy: [
         {

@@ -10,7 +10,9 @@ import type {
   TicketNote,
   Team,
   User,
+  Attachment,
 } from "@prisma/client";
+import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 
 type ConversationWithMessages = Conversation & {
   messages?: Message[];
@@ -25,6 +27,7 @@ type TicketWithRelations = Ticket & {
   activities?: TicketActivityWithActor[];
   tags?: (TicketTag & { tag: Tag })[];
   team?: Team | null;
+  attachments?: (Attachment & { uploadedBy?: User | null })[];
 };
 
 type TicketNoteWithAuthor = TicketNote & {
@@ -193,6 +196,7 @@ export const mapTicket = (ticket: TicketWithRelations) => ({
   notes: ticket.notes?.map(mapTicketNote) ?? undefined,
   activities: ticket.activities?.map(mapTicketActivity) ?? undefined,
   tags: ticket.tags?.map((link) => mapTag(link.tag)) ?? [],
+  attachments: mapAttachments(ticket.attachments ?? []),
   metrics: mapTicketMetrics(ticket),
   createdAt: ticket.createdAt,
   updatedAt: ticket.updatedAt,

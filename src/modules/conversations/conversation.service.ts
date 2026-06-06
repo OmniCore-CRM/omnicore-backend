@@ -94,6 +94,14 @@ export class ConversationService {
       include: {
         customer: true,
         team: true,
+        attachments: {
+          include: {
+            uploadedBy: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
         tags: {
           include: {
             tag: true,
@@ -168,6 +176,14 @@ export class ConversationService {
       include: {
         customer: true,
         team: true,
+        attachments: {
+          include: {
+            uploadedBy: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
         tags: {
           include: {
             tag: true,
@@ -221,6 +237,14 @@ export class ConversationService {
       include: {
         customer: true,
         team: true,
+        attachments: {
+          include: {
+            uploadedBy: true,
+          },
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
         tags: {
           include: {
             tag: true,
@@ -231,6 +255,16 @@ export class ConversationService {
         },
 
         messages: {
+          include: {
+            attachments: {
+              include: {
+                uploadedBy: true,
+              },
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
+          },
           orderBy: [
             {
               createdAt: "asc",

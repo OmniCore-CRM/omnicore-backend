@@ -50,6 +50,11 @@ enum MessageStatus {
   FAILED
 }
 
+enum AttachmentUploadedFrom {
+  AGENT
+  CUSTOMER_WIDGET
+}
+
 enum TicketStatus {
   OPEN
   PENDING
@@ -102,6 +107,7 @@ model Company {
   ticketTags             TicketTag[]
   teams                  Team[]
   teamMembers            TeamMember[]
+  attachments            Attachment[]
 }
 
 model User {
@@ -127,6 +133,7 @@ model User {
   conversationActivities ConversationActivity[] @relation("ConversationActivityActor")
   savedReplies           SavedReply[]           @relation("SavedReplyCreator")
   teamMemberships        TeamMember[]
+  attachments            Attachment[]           @relation("AttachmentUploader")
 }
 
 model Customer {
@@ -150,6 +157,7 @@ model Customer {
   conversations Conversation[]
   tickets       Ticket[]
   tags          CustomerTag[]
+  attachments   Attachment[]
 }
 
 model Conversation {
@@ -173,10 +181,11 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  messages   Message[]
-  tickets    Ticket[]
-  tags       ConversationTag[]
-  activities ConversationActivity[]
+  messages    Message[]
+  tickets     Ticket[]
+  tags        ConversationTag[]
+  activities  ConversationActivity[]
+  attachments Attachment[]
 
   @@index([companyId])
   @@index([customerId])
@@ -228,8 +237,9 @@ model Message {
   externalMessageId String?
   provider          ConversationChannel?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  attachments Attachment[]
 
   @@index([companyId])
   @@index([conversationId])
@@ -282,9 +292,10 @@ model Ticket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  notes      TicketNote[]
-  activities TicketActivity[]
-  tags       TicketTag[]
+  notes       TicketNote[]
+  activities  TicketActivity[]
+  tags        TicketTag[]
+  attachments Attachment[]
 
   @@index([companyId])
   @@index([conversationId])
@@ -293,6 +304,42 @@ model Ticket {
   @@index([teamId])
   @@index([status])
   @@index([priority])
+}
+
+model Attachment {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  uploadedById String?
+  uploadedBy   User?   @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  fileName     String
+  mimeType     String
+  fileSize     Int
+  storageKey   String                 @unique
+  uploadedFrom AttachmentUploadedFrom
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([conversationId])
+  @@index([messageId])
+  @@index([ticketId])
+  @@index([customerId])
 }
 
 model Team {

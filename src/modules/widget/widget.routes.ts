@@ -9,6 +9,8 @@ import {
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
+import { AttachmentController } from "@/modules/attachments/attachment.controller.js";
+import { uploadSingleAttachment } from "@/modules/attachments/attachment.upload.js";
 
 const router = Router();
 
@@ -29,6 +31,13 @@ router.post(
   protect,
   validateRequest(createWidgetInstallationSchema),
   WidgetController.createInstallation
+);
+
+router.post(
+  "/conversations/:conversationId/attachments",
+  widgetRateLimit,
+  uploadSingleAttachment,
+  AttachmentController.uploadWidget
 );
 
 router.patch(

@@ -71,6 +71,14 @@ const ticketDetailInclude = {
       createdAt: "desc",
     },
   },
+  attachments: {
+    include: {
+      uploadedBy: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  },
 } satisfies Prisma.TicketInclude;
 
 const viewerMutationError = new AppError(

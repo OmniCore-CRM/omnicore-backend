@@ -10,6 +10,8 @@ import {
   createTicketSchema,
   updateTicketSchema,
 } from "./ticket.validation.js";
+import { AttachmentController } from "@/modules/attachments/attachment.controller.js";
+import { uploadSingleAttachment } from "@/modules/attachments/attachment.upload.js";
 
 const router = Router();
 
@@ -50,6 +52,13 @@ router.post(
 );
 
 router.post("/:id/tags", protect, TagController.attachTicketTag);
+
+router.post(
+  "/:ticketId/attachments",
+  protect,
+  uploadSingleAttachment,
+  AttachmentController.upload
+);
 
 router.delete(
   "/:id/tags/:tagId",

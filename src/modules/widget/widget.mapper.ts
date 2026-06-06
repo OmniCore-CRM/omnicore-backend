@@ -3,7 +3,10 @@ import type {
   Customer,
   Message,
   WidgetInstallation,
+  Attachment,
+  User,
 } from "@prisma/client";
+import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 
 export const mapWidgetInstallation = (
   installation: WidgetInstallation
@@ -37,7 +40,11 @@ export const mapPublicWidgetCustomer = (customer: Customer) => ({
   updatedAt: customer.updatedAt,
 });
 
-export const mapPublicWidgetMessage = (message: Message) => ({
+export const mapPublicWidgetMessage = (
+  message: Message & {
+    attachments?: (Attachment & { uploadedBy?: User | null })[];
+  }
+) => ({
   id: message.id,
   conversationId: message.conversationId,
   sender: message.sender,
@@ -47,9 +54,14 @@ export const mapPublicWidgetMessage = (message: Message) => ({
   externalMessageId: message.externalMessageId,
   createdAt: message.createdAt,
   updatedAt: message.updatedAt,
+  attachments: mapAttachments(message.attachments ?? []),
 });
 
-export const mapPublicWidgetMessages = (messages: Message[]) =>
+export const mapPublicWidgetMessages = (
+  messages: (Message & {
+    attachments?: (Attachment & { uploadedBy?: User | null })[];
+  })[]
+) =>
   messages.map(mapPublicWidgetMessage);
 
 export const mapPublicWidgetConversation = (
