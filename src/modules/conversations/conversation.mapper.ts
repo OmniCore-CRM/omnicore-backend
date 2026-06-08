@@ -61,6 +61,10 @@ export const mapConversationActivity = (
 export const mapConversation = (
   conversation: ConversationWithRelations
 ) => {
+  const latestMessage = [...(conversation.messages ?? [])].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+  )[0];
+
   return {
     id: conversation.id,
     companyId: conversation.companyId,
@@ -79,6 +83,36 @@ export const mapConversation = (
 
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    lastMessage: latestMessage
+      ? {
+          id: latestMessage.id,
+          companyId: latestMessage.companyId,
+          conversationId: latestMessage.conversationId,
+          sender: latestMessage.sender,
+          content: latestMessage.content,
+          status: latestMessage.status,
+          provider: latestMessage.provider,
+          externalMessageId: latestMessage.externalMessageId,
+          createdAt: latestMessage.createdAt,
+          updatedAt: latestMessage.updatedAt,
+        }
+      : null,
+    latestMessage: latestMessage
+      ? {
+          id: latestMessage.id,
+          companyId: latestMessage.companyId,
+          conversationId: latestMessage.conversationId,
+          sender: latestMessage.sender,
+          content: latestMessage.content,
+          status: latestMessage.status,
+          provider: latestMessage.provider,
+          externalMessageId: latestMessage.externalMessageId,
+          createdAt: latestMessage.createdAt,
+          updatedAt: latestMessage.updatedAt,
+        }
+      : null,
+    lastMessagePreview: latestMessage?.content ?? null,
+    lastMessageAt: latestMessage?.createdAt ?? null,
 
     customer: {
       id: conversation.customer.id,

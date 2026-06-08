@@ -1,5 +1,6 @@
 import {
   TicketActivityAction,
+  TicketPriority,
   TicketStatus,
   type Prisma,
 } from "@prisma/client";
@@ -126,6 +127,13 @@ export class TicketService {
     query: TicketListQueryInput
   ) {
     const search = query.search?.trim();
+    const normalizedSearch = search?.toUpperCase();
+    const searchStatus = Object.values(TicketStatus).find(
+      (status) => status === normalizedSearch
+    );
+    const searchPriority = Object.values(TicketPriority).find(
+      (priority) => priority === normalizedSearch
+    );
     const where: Prisma.TicketWhereInput = {
       companyId,
       ...(query.status ? { status: query.status } : {}),
@@ -133,9 +141,19 @@ export class TicketService {
       ...(query.assigneeId
         ? { assigneeId: query.assigneeId }
         : {}),
+      ...(query.teamId ? { teamId: query.teamId } : {}),
+      ...(query.tagId
+        ? { tags: { some: { companyId, tagId: query.tagId } } }
+        : {}),
       ...(search
         ? {
             OR: [
+              {
+                id: {
+                  contains: search,
+                  mode: "insensitive",
+                },
+              },
               {
                 subject: {
                   contains: search,
@@ -178,6 +196,23 @@ export class TicketService {
                   ],
                 },
               },
+              {
+                tags: {
+                  some: {
+                    companyId,
+                    tag: {
+                      name: { contains: search, mode: "insensitive" },
+                    },
+                  },
+                },
+              },
+              {
+                team: {
+                  name: { contains: search, mode: "insensitive" },
+                },
+              },
+              ...(searchStatus ? [{ status: searchStatus }] : []),
+              ...(searchPriority ? [{ priority: searchPriority }] : []),
             ],
           }
         : {}),

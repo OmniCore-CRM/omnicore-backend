@@ -13,6 +13,8 @@ export const ticketListQuerySchema = z.object({
   status: z.enum(TicketStatus).optional(),
   priority: z.enum(TicketPriority).optional(),
   assigneeId: z.string().trim().min(1).max(128).optional(),
+  teamId: z.string().trim().min(1).max(128).optional(),
+  tagId: z.string().trim().min(1).max(128).optional(),
   search: z.string().trim().max(200).optional(),
   cursor: z.string().trim().min(1).max(128).optional(),
   limit: z.coerce.number().int().positive().max(100).default(30),
