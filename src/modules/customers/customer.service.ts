@@ -1,5 +1,8 @@
 import { prisma } from "@/config/db.js";
-import type { CreateCustomerInput } from "./customer.validation.js";
+import type {
+  CreateCustomerInput,
+  CustomerListQueryInput,
+} from "./customer.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import {
@@ -7,13 +10,8 @@ import {
   mapCustomerDetail,
   mapCustomers,
 } from "./customer.mapper.js";
-import type { PaginationParams } from "@/core/utils/pagination.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import type { Prisma } from "@prisma/client";
-
-type CustomerListParams = PaginationParams & {
-  search?: unknown;
-};
 
 export class CustomerService {
   // ===== Create customer under authenticated tenant =====
@@ -36,18 +34,14 @@ export class CustomerService {
   // ===== Fetch customers belonging to authenticated tenant =====
   static async getCustomers(
     companyId: string,
-    params: CustomerListParams
+    params: CustomerListQueryInput
   ) {
-    const search =
-      typeof params.search === "string"
-        ? params.search.trim()
-        : "";
+    const search = params.search?.trim();
+    const filters: Prisma.CustomerWhereInput[] = [];
 
-    const where: Prisma.CustomerWhereInput = {
-      companyId,
-      ...(search
-        ? {
-            OR: [
+    if (search) {
+      filters.push({
+        OR: [
               {
                 firstName: {
                   contains: search,
@@ -72,9 +66,47 @@ export class CustomerService {
                   mode: "insensitive",
                 },
               },
-            ],
-          }
-        : {}),
+        ],
+      });
+    }
+
+    if (params.tagId) {
+      filters.push({
+        tags: {
+          some: {
+            companyId,
+            tagId: params.tagId,
+          },
+        },
+      });
+    }
+
+    if (params.createdFrom || params.createdTo) {
+      filters.push({
+        createdAt: {
+          ...(params.createdFrom ? { gte: params.createdFrom } : {}),
+          ...(params.createdTo ? { lte: params.createdTo } : {}),
+        },
+      });
+    }
+
+    if (params.lastActivityFrom || params.lastActivityTo) {
+      const activityRange = {
+        ...(params.lastActivityFrom ? { gte: params.lastActivityFrom } : {}),
+        ...(params.lastActivityTo ? { lte: params.lastActivityTo } : {}),
+      };
+      filters.push({
+        OR: [
+          { updatedAt: activityRange },
+          { conversations: { some: { companyId, updatedAt: activityRange } } },
+          { tickets: { some: { companyId, updatedAt: activityRange } } },
+        ],
+      });
+    }
+
+    const where: Prisma.CustomerWhereInput = {
+      companyId,
+      ...(filters.length ? { AND: filters } : {}),
     };
 
     const customers = await prisma.customer.findMany({

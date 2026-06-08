@@ -4,7 +4,7 @@ import { asyncHandler } from "@/core/utils/async-handler.js";
 import { sendResponse } from "@/core/utils/send-response.js";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { ConversationService } from "./conversation.service.js";
-import { parsePaginationQuery } from "@/core/utils/pagination.js";
+import { conversationListQuerySchema } from "./conversation.validation.js";
 
 export class ConversationController {
   private static getUserContext(req: AuthenticatedRequest) {
@@ -50,17 +50,12 @@ export class ConversationController {
     // companyId comes from authenticated JWT context
     const companyId = req.user!.companyId;
 
-    const pagination = parsePaginationQuery(req.query);
+    const query = conversationListQuerySchema.parse(req.query);
 
     // Fetch tenant-scoped conversations
     const conversations = await ConversationService.getConversations(
       companyId,
-      {
-        ...pagination,
-        search: req.query.search,
-        channel: req.query.channel,
-        status: req.query.status,
-      }
+      query
     );
 
     // Send successful API response

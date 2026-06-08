@@ -8,6 +8,7 @@ import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import type {
+  ConversationListQueryInput,
   CreateConversationInput,
   UpdateConversationInput,
 } from "./conversation.validation.js";
@@ -16,40 +17,13 @@ import {
   mapConversationActivity,
   mapConversations,
 } from "./conversation.mapper.js";
-import type { PaginationParams } from "@/core/utils/pagination.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { getIO } from "@/socket/socket.server.js";
-
-type ConversationListParams = PaginationParams & {
-  search?: unknown;
-  channel?: unknown;
-  status?: unknown;
-};
 
 type UserContext = {
   userId: string;
   companyId: string;
   role: string;
-};
-
-const isConversationChannel = (
-  value: unknown
-): value is ConversationChannel => {
-  return (
-    typeof value === "string" &&
-    Object.values(ConversationChannel).includes(
-      value as ConversationChannel
-    )
-  );
-};
-
-const isConversationStatus = (
-  value: unknown
-): value is ConversationStatus => {
-  return (
-    typeof value === "string" &&
-    Object.values(ConversationStatus).includes(value as ConversationStatus)
-  );
 };
 
 const assertCanMutate = (user: UserContext) => {
@@ -119,27 +93,28 @@ export class ConversationService {
   // ===== Fetch conversations belonging to authenticated tenant =====
   static async getConversations(
     companyId: string,
-    params: ConversationListParams
+    params: ConversationListQueryInput
   ) {
-    const search =
-      typeof params.search === "string"
-        ? params.search.trim()
-        : "";
-    const channel = isConversationChannel(params.channel)
-      ? params.channel
-      : undefined;
-    const status = isConversationStatus(params.status)
-      ? params.status
-      : undefined;
+    const search = params.search?.trim();
+    const normalizedSearch = search?.toUpperCase();
+    const searchStatus = Object.values(ConversationStatus).find(
+      (status) => status === normalizedSearch
+    );
 
     const where: Prisma.ConversationWhereInput = {
       companyId,
-      ...(channel ? { channel } : {}),
-      ...(status ? { status } : {}),
+      ...(params.channel ? { channel: params.channel } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.teamId ? { teamId: params.teamId } : {}),
+      ...(params.tagId
+        ? { tags: { some: { companyId, tagId: params.tagId } } }
+        : {}),
       ...(search
         ? {
-            customer: {
-              OR: [
+            OR: [
+              {
+                customer: {
+                  OR: [
                 {
                   firstName: {
                     contains: search,
@@ -164,8 +139,34 @@ export class ConversationService {
                     mode: "insensitive",
                   },
                 },
-              ],
-            },
+                  ],
+                },
+              },
+              {
+                messages: {
+                  some: {
+                    companyId,
+                    content: { contains: search, mode: "insensitive" },
+                  },
+                },
+              },
+              {
+                tags: {
+                  some: {
+                    companyId,
+                    tag: {
+                      name: { contains: search, mode: "insensitive" },
+                    },
+                  },
+                },
+              },
+              {
+                team: {
+                  name: { contains: search, mode: "insensitive" },
+                },
+              },
+              ...(searchStatus ? [{ status: searchStatus }] : []),
+            ],
           }
         : {}),
     };
@@ -176,6 +177,10 @@ export class ConversationService {
       include: {
         customer: true,
         team: true,
+        messages: {
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 1,
+        },
         attachments: {
           include: {
             uploadedBy: true,
