@@ -6,6 +6,7 @@ import {
   mapSavedReply,
   mapSavedReplies,
 } from "./saved-reply.mapper.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import type {
   CreateSavedReplyInput,
   SavedReplyListQueryInput,
@@ -91,6 +92,17 @@ export class SavedReplyService {
       include: savedReplyInclude,
     });
 
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "SAVED_REPLY_CREATED",
+      entityType: "SAVED_REPLY",
+      entityId: reply.id,
+      metadata: {
+        title: reply.title,
+      },
+    });
+
     return mapSavedReply(reply);
   }
 
@@ -120,6 +132,17 @@ export class SavedReplyService {
       include: savedReplyInclude,
     });
 
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "SAVED_REPLY_UPDATED",
+      entityType: "SAVED_REPLY",
+      entityId: reply.id,
+      metadata: {
+        title: reply.title,
+      },
+    });
+
     return mapSavedReply(reply);
   }
 
@@ -141,6 +164,17 @@ export class SavedReplyService {
     await prisma.savedReply.delete({
       where: {
         id: replyId,
+      },
+    });
+
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "SAVED_REPLY_DELETED",
+      entityType: "SAVED_REPLY",
+      entityId: existing.id,
+      metadata: {
+        title: existing.title,
       },
     });
 

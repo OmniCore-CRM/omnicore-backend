@@ -9,6 +9,7 @@ import { AppError } from "@/core/errors/app-error.js";
 import { getIO } from "@/socket/socket.server.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { mapTeam, mapTeams } from "./team.mapper.js";
 import type {
   AssignTeamInput,
@@ -59,6 +60,16 @@ export class TeamService {
       data: { companyId: user.companyId, ...data },
       include: teamInclude,
     });
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TEAM_CREATED",
+      entityType: "TEAM",
+      entityId: team.id,
+      metadata: {
+        name: team.name,
+      },
+    });
     return mapTeam(team);
   }
 
@@ -70,13 +81,33 @@ export class TeamService {
       data,
       include: teamInclude,
     });
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TEAM_UPDATED",
+      entityType: "TEAM",
+      entityId: team.id,
+      metadata: {
+        name: team.name,
+      },
+    });
     return mapTeam(team);
   }
 
   static async remove(user: UserContext, teamId: string) {
     assertCanManageTeams(user);
-    await this.assertTeam(user.companyId, teamId);
+    const team = await this.assertTeam(user.companyId, teamId);
     await prisma.team.delete({ where: { id: teamId } });
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TEAM_DELETED",
+      entityType: "TEAM",
+      entityId: teamId,
+      metadata: {
+        name: team.name,
+      },
+    });
     return { id: teamId };
   }
 
@@ -93,6 +124,16 @@ export class TeamService {
       update: {},
       create: { teamId, userId: memberId, companyId: user.companyId },
     });
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TEAM_MEMBER_ADDED",
+      entityType: "TEAM",
+      entityId: teamId,
+      metadata: {
+        memberId,
+      },
+    });
     return this.get(user.companyId, teamId);
   }
 
@@ -101,6 +142,16 @@ export class TeamService {
     await this.assertTeam(user.companyId, teamId);
     await prisma.teamMember.deleteMany({
       where: { teamId, userId: memberId, companyId: user.companyId },
+    });
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TEAM_MEMBER_REMOVED",
+      entityType: "TEAM",
+      entityId: teamId,
+      metadata: {
+        memberId,
+      },
     });
     return this.get(user.companyId, teamId);
   }
@@ -133,7 +184,17 @@ export class TeamService {
       include: { assignee: true, createdBy: true, customer: true, conversation: true, team: true, tags: { include: { tag: true } } },
     });
     const dto = mapTicket(ticket!);
-    if (changed) getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
+    if (changed) {
+      getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: data.teamId ? "TICKET_TEAM_ASSIGNED" : "TICKET_TEAM_UNASSIGNED",
+        entityType: "TICKET",
+        entityId: ticketId,
+        metadata: { from: existing.teamId, to: data.teamId },
+      });
+    }
     return dto;
   }
 
@@ -165,7 +226,19 @@ export class TeamService {
       include: { customer: true, team: true, messages: { orderBy: { createdAt: "asc" } }, tags: { include: { tag: true } }, activities: { include: { actor: true }, orderBy: { createdAt: "desc" } } },
     });
     const dto = mapConversation(conversation!);
-    if (changed) getIO().to(`company:${user.companyId}`).emit("conversation:updated", dto);
+    if (changed) {
+      getIO().to(`company:${user.companyId}`).emit("conversation:updated", dto);
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: data.teamId
+          ? "CONVERSATION_TEAM_ASSIGNED"
+          : "CONVERSATION_TEAM_UNASSIGNED",
+        entityType: "CONVERSATION",
+        entityId: conversationId,
+        metadata: { from: existing.teamId, to: data.teamId },
+      });
+    }
     return dto;
   }
 
@@ -176,7 +249,8 @@ export class TeamService {
   }
 
   private static async assertTeam(companyId: string, teamId: string) {
-    const team = await prisma.team.findFirst({ where: { id: teamId, companyId }, select: { id: true } });
+    const team = await prisma.team.findFirst({ where: { id: teamId, companyId }, select: { id: true, name: true } });
     if (!team) throw new AppError("Team not found", HTTP_STATUS.NOT_FOUND);
+    return team;
   }
 }

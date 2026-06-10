@@ -108,6 +108,7 @@ model Company {
   teams                  Team[]
   teamMembers            TeamMember[]
   attachments            Attachment[]
+  auditLogs              AuditLog[]
 }
 
 model User {
@@ -134,6 +135,7 @@ model User {
   savedReplies           SavedReply[]           @relation("SavedReplyCreator")
   teamMemberships        TeamMember[]
   attachments            Attachment[]           @relation("AttachmentUploader")
+  auditLogs              AuditLog[]             @relation("AuditLogActor")
 }
 
 model Customer {
@@ -512,4 +514,27 @@ model TicketTag {
   @@id([ticketId, tagId])
   @@index([companyId])
   @@index([tagId])
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  actorId String?
+  actor   User?   @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, action])
+  @@index([companyId, entityType])
+  @@index([companyId, actorId])
+  @@index([companyId, entityType, entityId])
 }

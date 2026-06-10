@@ -5,6 +5,7 @@ import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { generateAccessToken } from "./auth.utils.js";
 import { mapAuthResponse } from "./auth.mapper.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 
 export class AuthService {
   // ===== Register new company owner =====
@@ -117,6 +118,17 @@ export class AuthService {
       user.companyId,
       user.role
     );
+
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: "USER_LOGIN",
+      entityType: "USER",
+      entityId: user.id,
+      metadata: {
+        role: user.role,
+      },
+    });
 
     // Return normalized authenticated session payload
     return mapAuthResponse({

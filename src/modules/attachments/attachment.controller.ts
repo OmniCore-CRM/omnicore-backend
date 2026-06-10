@@ -83,7 +83,7 @@ export class AttachmentController {
       const attachmentId = req.params.id as string;
       const result = req.user
         ? await AttachmentService.getAgentDownload(
-            req.user.companyId,
+            agentContext(req),
             attachmentId
           )
         : await AttachmentService.getWidgetDownload(attachmentId, {

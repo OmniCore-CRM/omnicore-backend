@@ -19,6 +19,7 @@ import {
 } from "./conversation.mapper.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { getIO } from "@/socket/socket.server.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 
 type UserContext = {
   userId: string;
@@ -358,6 +359,17 @@ export class ConversationService {
       getIO()
         .to(`company:${user.companyId}`)
         .emit("conversation:updated", conversation);
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "CONVERSATION_STATUS_CHANGED",
+        entityType: "CONVERSATION",
+        entityId: existing.id,
+        metadata: {
+          from: existing.status,
+          to: data.status,
+        },
+      });
     }
 
     return conversation;
