@@ -3,6 +3,7 @@ import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { mapTag, mapTags } from "./tag.mapper.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import type {
   CreateTagInput,
   TagListQueryInput,
@@ -75,6 +76,18 @@ export class TagService {
         },
       });
 
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "TAG_CREATED",
+        entityType: "TAG",
+        entityId: tag.id,
+        metadata: {
+          name: tag.name,
+          color: tag.color,
+        },
+      });
+
       return mapTag(tag);
     } catch (error) {
       if (
@@ -109,6 +122,18 @@ export class TagService {
         },
       });
 
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "TAG_UPDATED",
+        entityType: "TAG",
+        entityId: tag.id,
+        metadata: {
+          name: tag.name,
+          color: tag.color,
+        },
+      });
+
       return mapTag(tag);
     } catch (error) {
       if (
@@ -129,6 +154,17 @@ export class TagService {
     await prisma.tag.delete({
       where: {
         id: tagId,
+      },
+    });
+
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TAG_DELETED",
+      entityType: "TAG",
+      entityId: existing.id,
+      metadata: {
+        name: existing.name,
       },
     });
 
@@ -196,6 +232,18 @@ export class TagService {
       });
     }
 
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TAG_ATTACHED",
+      entityType: targetType.toUpperCase(),
+      entityId: targetId,
+      metadata: {
+        tagId,
+        tagName: tag.name,
+      },
+    });
+
     return mapTag(tag);
   }
 
@@ -238,6 +286,18 @@ export class TagService {
         },
       });
     }
+
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TAG_REMOVED",
+      entityType: targetType.toUpperCase(),
+      entityId: targetId,
+      metadata: {
+        tagId,
+        tagName: tag.name,
+      },
+    });
 
     return mapTag(tag);
   }

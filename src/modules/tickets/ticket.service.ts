@@ -15,6 +15,7 @@ import {
   mapTicketNotes,
   mapTickets,
 } from "./ticket.mapper.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import type {
   CreateConversationTicketInput,
   CreateTicketNoteInput,
@@ -332,6 +333,20 @@ export class TicketService {
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_created", dto);
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TICKET_CREATED",
+      entityType: "TICKET",
+      entityId: dto.id,
+      metadata: {
+        status: dto.status,
+        priority: dto.priority,
+        assigneeId: dto.assigneeId,
+        customerId: dto.customerId,
+        conversationId: dto.conversationId,
+      },
+    });
 
     return dto;
   }
@@ -423,6 +438,21 @@ export class TicketService {
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_created", dto);
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TICKET_CREATED",
+      entityType: "TICKET",
+      entityId: dto.id,
+      metadata: {
+        source: "conversation",
+        status: dto.status,
+        priority: dto.priority,
+        assigneeId: dto.assigneeId,
+        customerId: dto.customerId,
+        conversationId: dto.conversationId,
+      },
+    });
 
     return dto;
   }
@@ -560,6 +590,74 @@ export class TicketService {
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
 
+    if (data.status !== undefined && data.status !== existing.status) {
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "TICKET_STATUS_CHANGED",
+        entityType: "TICKET",
+        entityId: existing.id,
+        metadata: {
+          from: existing.status,
+          to: data.status,
+        },
+      });
+    }
+
+    if (data.priority !== undefined && data.priority !== existing.priority) {
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "TICKET_PRIORITY_CHANGED",
+        entityType: "TICKET",
+        entityId: existing.id,
+        metadata: {
+          from: existing.priority,
+          to: data.priority,
+        },
+      });
+    }
+
+    if (
+      data.assigneeId !== undefined &&
+      links.assigneeId !== existing.assigneeId
+    ) {
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: links.assigneeId
+          ? "TICKET_ASSIGNED"
+          : "TICKET_UNASSIGNED",
+        entityType: "TICKET",
+        entityId: existing.id,
+        metadata: {
+          from: existing.assigneeId,
+          to: links.assigneeId,
+        },
+      });
+    }
+
+    if (
+      (data.subject !== undefined || data.description !== undefined) &&
+      data.status === undefined &&
+      data.priority === undefined &&
+      data.assigneeId === undefined
+    ) {
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "TICKET_UPDATED",
+        entityType: "TICKET",
+        entityId: existing.id,
+        metadata: {
+          fields: [
+            data.subject !== undefined ? "subject" : null,
+            data.description !== undefined ? "description" : null,
+          ].filter(Boolean),
+        },
+      });
+    }
+
     return dto;
   }
 
@@ -620,6 +718,16 @@ export class TicketService {
 
     const dto = mapTicketNotes([note])[0];
     getIO().to(`company:${user.companyId}`).emit("ticket_note_added", dto);
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "TICKET_NOTE_ADDED",
+      entityType: "TICKET",
+      entityId: ticketId,
+      metadata: {
+        noteId: dto.id,
+      },
+    });
 
     return dto;
   }

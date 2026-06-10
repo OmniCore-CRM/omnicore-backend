@@ -9,6 +9,7 @@ import { getIO } from "@/socket/socket.server.js";
 import { mapAttachment } from "./attachment.mapper.js";
 import { attachmentStorage } from "./attachment.storage.js";
 import { WidgetService } from "@/modules/widget/widget.service.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 
 type AgentContext = {
   userId: string;
@@ -75,16 +76,31 @@ export class AttachmentService {
     });
   }
 
-  static async getAgentDownload(companyId: string, attachmentId: string) {
+  static async getAgentDownload(user: AgentContext, attachmentId: string) {
     const attachment = await prisma.attachment.findFirst({
       where: {
         id: attachmentId,
-        companyId,
+        companyId: user.companyId,
       },
       include: attachmentInclude,
     });
 
     if (!attachment) throw notFound();
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.userId,
+      action: "ATTACHMENT_DOWNLOADED",
+      entityType: "ATTACHMENT",
+      entityId: attachment.id,
+      metadata: {
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        fileSize: attachment.fileSize,
+        conversationId: attachment.conversationId,
+        ticketId: attachment.ticketId,
+        messageId: attachment.messageId,
+      },
+    });
     return this.readDownload(attachment);
   }
 
@@ -227,6 +243,23 @@ export class AttachmentService {
       });
 
       const dto = mapAttachment(attachment);
+      await AuditLogService.record({
+        companyId: data.companyId,
+        actorId: data.uploadedById ?? null,
+        action: "ATTACHMENT_UPLOADED",
+        entityType: "ATTACHMENT",
+        entityId: dto.id,
+        metadata: {
+          uploadedFrom: data.uploadedFrom,
+          fileName: dto.fileName,
+          mimeType: dto.mimeType,
+          fileSize: dto.fileSize,
+          conversationId: dto.conversationId,
+          ticketId: dto.ticketId,
+          messageId: dto.messageId,
+          customerId: dto.customerId,
+        },
+      });
       const io = getIO();
       io.to(`company:${data.companyId}`).emit("attachment_created", dto);
       if (data.conversationId) {
