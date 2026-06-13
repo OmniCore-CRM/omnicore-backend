@@ -14,11 +14,12 @@ export class MessageController {
       res: Response
     ) => {
       // companyId comes from authenticated JWT context
-      const companyId = req.user!.companyId;
-
       // Create tenant-scoped message
       const message = await MessageService.createMessage(
-        companyId,
+        {
+          companyId: req.user!.companyId,
+          userId: req.user!.userId,
+        },
         req.body
       );
 

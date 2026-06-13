@@ -12,6 +12,8 @@ import tagRoutes from "@/modules/tags/tag.routes.js";
 import teamRoutes from "@/modules/teams/team.routes.js";
 import attachmentRoutes from "@/modules/attachments/attachment.routes.js";
 import auditLogRoutes from "@/modules/audit-logs/audit-log.routes.js";
+import analyticsRoutes from "@/modules/analytics/analytics.routes.js";
+import slaPolicyRoutes from "@/modules/sla-policies/sla-policy.routes.js";
 
 const router = Router();
 
@@ -41,6 +43,8 @@ router.use("/tags", tagRoutes);
 router.use("/teams", teamRoutes);
 router.use("/attachments", attachmentRoutes);
 router.use("/audit-logs", auditLogRoutes);
+router.use("/analytics", analyticsRoutes);
+router.use("/sla-policies", slaPolicyRoutes);
 
 // Widget routes
 router.use("/widget", widgetRoutes);

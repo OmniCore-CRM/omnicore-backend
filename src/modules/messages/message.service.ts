@@ -8,13 +8,15 @@ import { ChannelService } from "../channels/channel.service.js";
 import { mapMessage, mapMessages } from "./message.mapper.js";
 import type { PaginationParams } from "@/core/utils/pagination.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
+import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
 
 export class MessageService {
   // ===== Create tenant-scoped message =====
   static async createMessage(
-    companyId: string,
+    user: { companyId: string; userId: string },
     data: CreateMessageInput
   ) {
+    const companyId = user.companyId;
     // Ensure conversation belongs to authenticated tenant
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -88,6 +90,25 @@ export class MessageService {
     io.to(
       `conversation:${data.conversationId}`
     ).emit("new_message", mapMessage(message));
+
+    if (data.sender === "AGENT") {
+      try {
+        await TicketSlaService.recordFirstResponse(
+          companyId,
+          data.conversationId,
+          user.userId
+        );
+      } catch {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "ticket_sla_first_response_update_failed",
+            companyId,
+            conversationId: data.conversationId,
+          })
+        );
+      }
+    }
 
     // Route outbound message through connected provider
     if (conversation.channel === "WHATSAPP") {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TicketPriority, TicketStatus } from "@prisma/client";
+import { SlaStatus, TicketPriority, TicketStatus } from "@prisma/client";
 
 const nullableIdSchema = z
   .string()
@@ -15,6 +15,7 @@ export const ticketListQuerySchema = z.object({
   assigneeId: z.string().trim().min(1).max(128).optional(),
   teamId: z.string().trim().min(1).max(128).optional(),
   tagId: z.string().trim().min(1).max(128).optional(),
+  slaStatus: z.enum(SlaStatus).optional(),
   search: z.string().trim().max(200).optional(),
   cursor: z.string().trim().min(1).max(128).optional(),
   limit: z.coerce.number().int().positive().max(100).default(30),
