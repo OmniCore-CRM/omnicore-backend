@@ -599,6 +599,17 @@ export class WidgetService {
       };
     }
 
+    const slaPolicy = await tx.slaPolicy.findFirst({
+      where: {
+        companyId: input.companyId,
+        priority: TicketPriority.MEDIUM,
+        enabled: true,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+    const createdAt = new Date();
     const createdTicket = await tx.ticket.create({
       data: {
         companyId: input.companyId,
@@ -609,6 +620,16 @@ export class WidgetService {
         description: input.messageContent,
         status: TicketStatus.OPEN,
         priority: TicketPriority.MEDIUM,
+        ...(slaPolicy
+          ? {
+              firstResponseDueAt: new Date(
+                createdAt.getTime() + slaPolicy.firstResponseMinutes * 60_000
+              ),
+              resolutionDueAt: new Date(
+                createdAt.getTime() + slaPolicy.resolutionMinutes * 60_000
+              ),
+            }
+          : {}),
       },
       include: {
         assignee: true,

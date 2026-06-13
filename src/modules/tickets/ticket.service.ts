@@ -16,6 +16,7 @@ import {
   mapTickets,
 } from "./ticket.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
 import type {
   CreateConversationTicketInput,
   CreateTicketNoteInput,
@@ -127,6 +128,7 @@ export class TicketService {
     companyId: string,
     query: TicketListQueryInput
   ) {
+    await TicketSlaService.refreshCompanyTickets(companyId);
     const search = query.search?.trim();
     const normalizedSearch = search?.toUpperCase();
     const searchStatus = Object.values(TicketStatus).find(
@@ -146,6 +148,7 @@ export class TicketService {
       ...(query.tagId
         ? { tags: { some: { companyId, tagId: query.tagId } } }
         : {}),
+      ...(query.slaStatus ? { slaStatus: query.slaStatus } : {}),
       ...(search
         ? {
             OR: [
@@ -250,6 +253,7 @@ export class TicketService {
   }
 
   static async getTicketById(companyId: string, ticketId: string) {
+    await TicketSlaService.refreshTickets(companyId, [ticketId]);
     const ticket = await prisma.ticket.findFirst({
       where: {
         id: ticketId,
@@ -276,6 +280,10 @@ export class TicketService {
       conversationId: data.conversationId ?? undefined,
       assigneeId: data.assigneeId ?? undefined,
     });
+    const sla = await TicketSlaService.deadlinesForPriority(
+      user.companyId,
+      data.priority
+    );
 
     const createdTicketId = await prisma.$transaction(async (tx) => {
       const created = await tx.ticket.create({
@@ -289,6 +297,7 @@ export class TicketService {
           customerId: links.customerId,
           conversationId: links.conversationId,
           assigneeId: links.assigneeId,
+          ...sla,
         },
         select: {
           id: true,
@@ -381,6 +390,10 @@ export class TicketService {
       conversationId: conversation.id,
       assigneeId: data.assigneeId ?? undefined,
     });
+    const sla = await TicketSlaService.deadlinesForPriority(
+      user.companyId,
+      data.priority
+    );
 
     const updatedTicketId = await prisma.$transaction(async (tx) => {
       const created = await tx.ticket.create({
@@ -393,6 +406,7 @@ export class TicketService {
           customerId: links.customerId,
           conversationId: links.conversationId,
           assigneeId: links.assigneeId,
+          ...sla,
         },
         select: {
           id: true,
@@ -474,6 +488,8 @@ export class TicketService {
         status: true,
         priority: true,
         assigneeId: true,
+        createdAt: true,
+        resolvedAt: true,
       },
     });
 
@@ -488,6 +504,18 @@ export class TicketService {
     const links = await this.resolveTicketLinks(user.companyId, {
       assigneeId: data.assigneeId ?? undefined,
     });
+    const slaUpdate =
+      data.priority !== undefined && data.priority !== existing.priority
+        ? await TicketSlaService.deadlinesForPriority(
+            user.companyId,
+            data.priority,
+            existing.createdAt
+          )
+        : {};
+    const resolvedAt =
+      data.status === TicketStatus.RESOLVED || data.status === TicketStatus.CLOSED
+        ? existing.resolvedAt ?? new Date()
+        : undefined;
 
     const updatedTicketId = await prisma.$transaction(async (tx) => {
       const updated = await tx.ticket.update({
@@ -508,6 +536,8 @@ export class TicketService {
           ...(data.assigneeId !== undefined
             ? { assigneeId: links.assigneeId }
             : {}),
+          ...slaUpdate,
+          ...(resolvedAt ? { resolvedAt } : {}),
         },
         select: {
           id: true,
@@ -576,6 +606,21 @@ export class TicketService {
         });
       }
 
+      if (Object.keys(slaUpdate).length > 0 || resolvedAt) {
+        activities.push({
+          companyId: user.companyId,
+          ticketId: existing.id,
+          actorId: user.userId,
+          action: TicketActivityAction.SLA_UPDATED,
+          metadata: {
+            ...(Object.keys(slaUpdate).length > 0
+              ? { reason: "priority_changed" }
+              : {}),
+            ...(resolvedAt ? { resolvedAt: resolvedAt.toISOString() } : {}),
+          },
+        });
+      }
+
       if (activities.length > 0) {
         await tx.ticketActivity.createMany({
           data: activities,
@@ -585,6 +630,11 @@ export class TicketService {
       return updated.id;
     });
 
+    await TicketSlaService.refreshTickets(
+      user.companyId,
+      [updatedTicketId],
+      user.userId
+    );
     const ticket = await this.findTicketForList(user.companyId, updatedTicketId);
 
     const dto = mapTicket(ticket);
@@ -654,6 +704,22 @@ export class TicketService {
             data.subject !== undefined ? "subject" : null,
             data.description !== undefined ? "description" : null,
           ].filter(Boolean),
+        },
+      });
+    }
+
+    if (Object.keys(slaUpdate).length > 0 || resolvedAt) {
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: "TICKET_SLA_UPDATED",
+        entityType: "TICKET",
+        entityId: existing.id,
+        metadata: {
+          ...(Object.keys(slaUpdate).length > 0
+            ? { reason: "priority_changed" }
+            : {}),
+          ...(resolvedAt ? { resolvedAt: resolvedAt.toISOString() } : {}),
         },
       });
     }
