@@ -30,7 +30,7 @@ type TagLink = {
 };
 
 type TicketActivityWithActor = TicketActivity & {
-  actor: User;
+  actor: User | null;
 };
 
 type TicketNoteWithAuthor = TicketNote & {

@@ -9,6 +9,7 @@ import { mapMessage } from "@/modules/messages/message.mapper.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { env } from "@/config/env.js";
 import { resolveDevelopmentIngestionCompanyId } from "@/core/utils/tenant-resolution.js";
+import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
@@ -231,6 +232,11 @@ export class ChannelService {
         "new_conversation",
         mapConversation(conversationWithRelations)
       );
+      await AssignmentRuleService.applyConversationRules({
+        companyId,
+        conversationId: result.conversation.id,
+        channel: result.conversation.channel,
+      });
     }
   }
 

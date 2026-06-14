@@ -20,6 +20,7 @@ import {
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { getIO } from "@/socket/socket.server.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 
 type UserContext = {
   userId: string;
@@ -88,7 +89,29 @@ export class ConversationService {
       },
     });
 
-    return mapConversation(conversation);
+    await AssignmentRuleService.applyConversationRules({
+      companyId,
+      conversationId: conversation.id,
+      channel: conversation.channel,
+    });
+
+    const routedConversation = await prisma.conversation.findFirst({
+      where: { id: conversation.id, companyId },
+      include: {
+        customer: true,
+        team: true,
+        attachments: {
+          include: { uploadedBy: true },
+          orderBy: { createdAt: "asc" },
+        },
+        tags: {
+          include: { tag: true },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+
+    return mapConversation(routedConversation!);
   }
 
   // ===== Fetch conversations belonging to authenticated tenant =====

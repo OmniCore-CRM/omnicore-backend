@@ -35,6 +35,7 @@ import {
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
+import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 
 type RequestOrigin = string | undefined;
 
@@ -274,6 +275,18 @@ export class WidgetService {
         "ticket_created",
         mapTicket(result.ticket.ticket)
       );
+    }
+    await AssignmentRuleService.applyConversationRules({
+      companyId: installation.companyId,
+      conversationId: result.conversation.id,
+      channel: result.conversation.channel,
+    });
+    if (result.ticket.created) {
+      await AssignmentRuleService.applyTicketRules({
+        companyId: installation.companyId,
+        ticketId: result.ticket.ticket.id,
+        priority: result.ticket.ticket.priority,
+      });
     }
 
     return {
