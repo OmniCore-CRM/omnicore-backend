@@ -14,6 +14,7 @@ import attachmentRoutes from "@/modules/attachments/attachment.routes.js";
 import auditLogRoutes from "@/modules/audit-logs/audit-log.routes.js";
 import analyticsRoutes from "@/modules/analytics/analytics.routes.js";
 import slaPolicyRoutes from "@/modules/sla-policies/sla-policy.routes.js";
+import assignmentRuleRoutes from "@/modules/assignment-rules/assignment-rule.routes.js";
 
 const router = Router();
 
@@ -45,6 +46,7 @@ router.use("/attachments", attachmentRoutes);
 router.use("/audit-logs", auditLogRoutes);
 router.use("/analytics", analyticsRoutes);
 router.use("/sla-policies", slaPolicyRoutes);
+router.use("/assignment-rules", assignmentRuleRoutes);
 
 // Widget routes
 router.use("/widget", widgetRoutes);

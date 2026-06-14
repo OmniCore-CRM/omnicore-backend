@@ -4,6 +4,7 @@ import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { mapTag, mapTags } from "./tag.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import type {
   CreateTagInput,
   TagListQueryInput,
@@ -243,6 +244,21 @@ export class TagService {
         tagName: tag.name,
       },
     });
+
+    if (targetType === "ticket") {
+      const ticket = await prisma.ticket.findFirst({
+        where: { id: targetId, companyId: user.companyId },
+        select: { id: true, priority: true },
+      });
+      if (ticket) {
+        await AssignmentRuleService.applyTicketRules({
+          companyId: user.companyId,
+          actorId: user.userId,
+          ticketId: ticket.id,
+          priority: ticket.priority,
+        });
+      }
+    }
 
     return mapTag(tag);
   }

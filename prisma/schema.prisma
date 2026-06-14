@@ -34,6 +34,7 @@ enum ConversationActivityAction {
   STATUS_CHANGED
   TEAM_ASSIGNED
   TEAM_UNASSIGNED
+  AUTO_TEAM_ASSIGNED
 }
 
 enum MessageSender {
@@ -89,8 +90,20 @@ enum TicketActivityAction {
   MESSAGE_RECEIVED_ON_WIDGET
   TEAM_ASSIGNED
   TEAM_UNASSIGNED
+  AUTO_TEAM_ASSIGNED
   SLA_UPDATED
   SLA_BREACHED
+}
+
+enum AssignmentRuleTargetType {
+  CONVERSATION
+  TICKET
+}
+
+enum AssignmentRuleConditionType {
+  CHANNEL
+  PRIORITY
+  TAG
 }
 
 model Company {
@@ -119,6 +132,7 @@ model Company {
   attachments            Attachment[]
   auditLogs              AuditLog[]
   slaPolicies            SlaPolicy[]
+  assignmentRules        AssignmentRule[]
 }
 
 model User {
@@ -214,8 +228,8 @@ model ConversationActivity {
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  actorId String
-  actor   User   @relation("ConversationActivityActor", fields: [actorId], references: [id])
+  actorId String?
+  actor   User?  @relation("ConversationActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   action   ConversationActivityAction
   metadata Json?
@@ -397,6 +411,7 @@ model Team {
   members       TeamMember[]
   tickets       Ticket[]
   conversations Conversation[]
+  assignmentRules AssignmentRule[]
 
   @@unique([companyId, name])
   @@index([companyId])
@@ -417,6 +432,29 @@ model TeamMember {
   @@id([teamId, userId])
   @@index([companyId])
   @@index([userId])
+}
+
+model AssignmentRule {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  name          String
+  enabled       Boolean                     @default(true)
+  targetType    AssignmentRuleTargetType
+  conditionType AssignmentRuleConditionType
+  conditionValue String
+
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId, targetType, enabled, createdAt])
+  @@index([companyId, teamId])
 }
 
 model TicketNote {
@@ -449,8 +487,8 @@ model TicketActivity {
   ticketId String
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
-  actorId String
-  actor   User   @relation("TicketActivityActor", fields: [actorId], references: [id])
+  actorId String?
+  actor   User?  @relation("TicketActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   action   TicketActivityAction
   metadata Json?

@@ -35,7 +35,7 @@ type TicketNoteWithAuthor = TicketNote & {
 };
 
 type TicketActivityWithActor = TicketActivity & {
-  actor: User;
+  actor: User | null;
 };
 
 const mapUserSummary = (user?: User | null) => {

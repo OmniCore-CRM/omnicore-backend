@@ -24,7 +24,7 @@ type ConversationWithRelations = Conversation & {
 };
 
 type ConversationActivityWithActor = ConversationActivity & {
-  actor: User;
+  actor: User | null;
 };
 
 const mapTag = (tag: Tag) => ({
@@ -36,14 +36,17 @@ const mapTag = (tag: Tag) => ({
   updatedAt: tag.updatedAt,
 });
 
-const mapUserSummary = (user: User) => ({
+const mapUserSummary = (user?: User | null) =>
+  user
+    ? {
   id: user.id,
   email: user.email,
   firstName: user.firstName,
   lastName: user.lastName,
   role: user.role,
   displayName: [user.firstName, user.lastName].filter(Boolean).join(" "),
-});
+      }
+    : null;
 
 export const mapConversationActivity = (
   activity: ConversationActivityWithActor

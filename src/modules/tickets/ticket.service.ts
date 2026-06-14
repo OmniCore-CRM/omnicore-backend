@@ -17,6 +17,7 @@ import {
 } from "./ticket.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
+import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import type {
   CreateConversationTicketInput,
   CreateTicketNoteInput,
@@ -338,6 +339,12 @@ export class TicketService {
       return created.id;
     });
 
+    await AssignmentRuleService.applyTicketRules({
+      companyId: user.companyId,
+      actorId: user.userId,
+      ticketId: createdTicketId,
+      priority: data.priority,
+    });
     const ticket = await this.findTicketForList(user.companyId, createdTicketId);
 
     const dto = mapTicket(ticket);
@@ -448,6 +455,12 @@ export class TicketService {
       return created.id;
     });
 
+    await AssignmentRuleService.applyTicketRules({
+      companyId: user.companyId,
+      actorId: user.userId,
+      ticketId: updatedTicketId,
+      priority: data.priority,
+    });
     const ticket = await this.findTicketForList(user.companyId, updatedTicketId);
 
     const dto = mapTicket(ticket);
