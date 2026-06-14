@@ -75,6 +75,7 @@ export const mapConversation = (
 
     channel: conversation.channel,
     status: conversation.status,
+    subject: conversation.subject,
     teamId: conversation.teamId,
     team: conversation.team
       ? {
@@ -96,6 +97,7 @@ export const mapConversation = (
           status: latestMessage.status,
           provider: latestMessage.provider,
           externalMessageId: latestMessage.externalMessageId,
+          metadata: latestMessage.metadata,
           createdAt: latestMessage.createdAt,
           updatedAt: latestMessage.updatedAt,
         }
@@ -110,6 +112,7 @@ export const mapConversation = (
           status: latestMessage.status,
           provider: latestMessage.provider,
           externalMessageId: latestMessage.externalMessageId,
+          metadata: latestMessage.metadata,
           createdAt: latestMessage.createdAt,
           updatedAt: latestMessage.updatedAt,
         }
@@ -136,6 +139,7 @@ export const mapConversation = (
 
       provider: message.provider,
       externalMessageId: message.externalMessageId,
+      metadata: message.metadata,
       attachments: mapAttachments(message.attachments ?? []),
 
       createdAt: message.createdAt,

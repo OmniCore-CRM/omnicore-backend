@@ -21,6 +21,7 @@ export const mapMessage = (
 
     provider: message.provider,
     externalMessageId: message.externalMessageId,
+    metadata: message.metadata,
     attachments: mapAttachments(message.attachments ?? []),
 
     createdAt: message.createdAt,

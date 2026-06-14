@@ -10,6 +10,7 @@ import { mapConversation } from "@/modules/conversations/conversation.mapper.js"
 import { env } from "@/config/env.js";
 import { resolveDevelopmentIngestionCompanyId } from "@/core/utils/tenant-resolution.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
+import { EmailService } from "@/modules/email/email.service.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
@@ -309,6 +310,16 @@ export class ChannelService {
           messageId,
           conversationId,
           customerPhone: conversation.customer.phone || "",
+          content,
+        });
+
+      case ConversationChannel.EMAIL:
+        return await EmailService.sendOutboundMessage({
+          companyId: conversation.companyId,
+          messageId,
+          conversationId,
+          customerEmail: conversation.customer.email || "",
+          subject: conversation.subject,
           content,
         });
 
