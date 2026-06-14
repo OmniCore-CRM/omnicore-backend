@@ -53,6 +53,40 @@ const extractName = (value: unknown) => {
 
 const parseInboundEmail = (payload: unknown): InboundEmail => {
   const root = payload as Record<string, unknown>;
+  const allowDevelopmentPayload =
+    env.NODE_ENV === "development" ||
+    env.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT;
+
+  if (
+    allowDevelopmentPayload &&
+    root?.type === "omnicore.email.test" &&
+    typeof root.fromEmail === "string" &&
+    typeof root.toEmail === "string" &&
+    typeof root.content === "string"
+  ) {
+    const fromEmail = extractAddress(root.fromEmail);
+    const toEmail = extractAddress(root.toEmail);
+    const content = root.content.trim();
+    if (!fromEmail || !toEmail || !content) {
+      throw new AppError("Unsupported email webhook payload", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    return {
+      externalMessageId:
+        typeof root.externalMessageId === "string" && root.externalMessageId.trim()
+          ? root.externalMessageId.trim()
+          : `dev-email-${Date.now()}`,
+      fromEmail,
+      fromName: typeof root.fromName === "string" ? root.fromName.trim() : undefined,
+      toEmail,
+      subject:
+        typeof root.subject === "string" && root.subject.trim()
+          ? root.subject.trim().slice(0, 500)
+          : "Local email test",
+      content: content.slice(0, 5000),
+    };
+  }
+
   const data =
     root && typeof root.data === "object" && root.data
       ? (root.data as Record<string, unknown>)
