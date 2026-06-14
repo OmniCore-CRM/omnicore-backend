@@ -6,6 +6,7 @@ import type {
   Message,
   Tag,
   Team,
+  Ticket,
   User,
   Attachment,
 } from "@prisma/client";
@@ -21,10 +22,15 @@ type ConversationWithRelations = Conversation & {
   tags?: (ConversationTag & { tag: Tag })[];
   activities?: ConversationActivityWithActor[];
   team?: Team | null;
+  tickets?: ConversationTicketWithRelations[];
 };
 
 type ConversationActivityWithActor = ConversationActivity & {
   actor: User | null;
+};
+
+type ConversationTicketWithRelations = Ticket & {
+  assignee?: User | null;
 };
 
 const mapTag = (tag: Tag) => ({
@@ -47,6 +53,17 @@ const mapUserSummary = (user?: User | null) =>
   displayName: [user.firstName, user.lastName].filter(Boolean).join(" "),
       }
     : null;
+
+const mapTicketSummary = (ticket: ConversationTicketWithRelations) => ({
+  id: ticket.id,
+  subject: ticket.subject,
+  status: ticket.status,
+  priority: ticket.priority,
+  assigneeId: ticket.assigneeId,
+  assignee: mapUserSummary(ticket.assignee),
+  createdAt: ticket.createdAt,
+  updatedAt: ticket.updatedAt,
+});
 
 export const mapConversationActivity = (
   activity: ConversationActivityWithActor
@@ -83,6 +100,10 @@ export const mapConversation = (
           name: conversation.team.name,
           description: conversation.team.description,
         }
+      : null,
+    tickets: conversation.tickets?.map(mapTicketSummary) ?? [],
+    primaryTicket: conversation.tickets?.[0]
+      ? mapTicketSummary(conversation.tickets[0])
       : null,
 
     createdAt: conversation.createdAt,

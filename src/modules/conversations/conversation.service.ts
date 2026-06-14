@@ -124,11 +124,25 @@ export class ConversationService {
     const searchStatus = Object.values(ConversationStatus).find(
       (status) => status === normalizedSearch
     );
+    const linkedTicketFilter =
+      params.ticketStatus || params.ticketPriority || params.assigneeId
+        ? {
+            companyId,
+            ...(params.ticketStatus ? { status: params.ticketStatus } : {}),
+            ...(params.ticketPriority
+              ? { priority: params.ticketPriority }
+              : {}),
+            ...(params.assigneeId ? { assigneeId: params.assigneeId } : {}),
+          }
+        : null;
 
     const where: Prisma.ConversationWhereInput = {
       companyId,
       ...(params.channel ? { channel: params.channel } : {}),
       ...(params.status ? { status: params.status } : {}),
+      ...(linkedTicketFilter
+        ? { tickets: { some: linkedTicketFilter } }
+        : {}),
       ...(params.teamId ? { teamId: params.teamId } : {}),
       ...(params.tagId
         ? { tags: { some: { companyId, tagId: params.tagId } } }
@@ -139,6 +153,12 @@ export class ConversationService {
               {
                 customer: {
                   OR: [
+                    {
+                      id: {
+                        contains: search,
+                        mode: "insensitive",
+                      },
+                    },
                 {
                   firstName: {
                     contains: search,
@@ -221,6 +241,20 @@ export class ConversationService {
             createdAt: "asc",
           },
         },
+        tickets: {
+          include: {
+            assignee: true,
+          },
+          orderBy: [
+            {
+              updatedAt: "desc",
+            },
+            {
+              id: "desc",
+            },
+          ],
+          take: 1,
+        },
       },
 
       orderBy: [
@@ -281,6 +315,19 @@ export class ConversationService {
           orderBy: {
             createdAt: "asc",
           },
+        },
+        tickets: {
+          include: {
+            assignee: true,
+          },
+          orderBy: [
+            {
+              updatedAt: "desc",
+            },
+            {
+              id: "desc",
+            },
+          ],
         },
 
         messages: {
