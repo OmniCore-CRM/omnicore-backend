@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { ChannelController } from "./channel.controller.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
+import emailRoutes from "@/modules/email/email.routes.js";
 
 const router = Router();
+router.use("/email", emailRoutes);
 
 const webhookRateLimit = rateLimit({
   windowMs: 60 * 1000,

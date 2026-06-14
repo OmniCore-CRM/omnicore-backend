@@ -28,6 +28,11 @@ const envSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
 
+  EMAIL_PROVIDER: z.enum(["resend"]).optional(),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+  EMAIL_WEBHOOK_SECRET: z.string().optional(),
+
   DEVELOPMENT_INGESTION_COMPANY_ID: z.string().optional(),
   ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT: z.string().optional(),
 }).superRefine((value, ctx) => {
@@ -84,6 +89,30 @@ const envSchema = z.object({
       code: "custom",
       path: ["WHATSAPP_ACCESS_TOKEN"],
       message: "WHATSAPP_ACCESS_TOKEN is required outside development",
+    });
+  }
+
+  if (value.EMAIL_PROVIDER && !value.RESEND_API_KEY) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["RESEND_API_KEY"],
+      message: "RESEND_API_KEY is required when EMAIL_PROVIDER is configured",
+    });
+  }
+
+  if (value.EMAIL_PROVIDER && !value.EMAIL_FROM) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["EMAIL_FROM"],
+      message: "EMAIL_FROM is required when EMAIL_PROVIDER is configured",
+    });
+  }
+
+  if (value.EMAIL_PROVIDER && !value.EMAIL_WEBHOOK_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["EMAIL_WEBHOOK_SECRET"],
+      message: "EMAIL_WEBHOOK_SECRET is required when EMAIL_PROVIDER is configured",
     });
   }
 });

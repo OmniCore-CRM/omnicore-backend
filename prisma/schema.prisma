@@ -106,6 +106,15 @@ enum AssignmentRuleConditionType {
   TAG
 }
 
+enum EmailProvider {
+  RESEND
+}
+
+enum EmailAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
 model Company {
   id   String @id @default(cuid())
   name String
@@ -133,6 +142,7 @@ model Company {
   auditLogs              AuditLog[]
   slaPolicies            SlaPolicy[]
   assignmentRules        AssignmentRule[]
+  emailAccounts          EmailAccount[]
 }
 
 model User {
@@ -200,6 +210,7 @@ model Conversation {
   // Communication channel
   channel ConversationChannel
   status  ConversationStatus  @default(OPEN)
+  subject String?
 
   teamId String?
   team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
@@ -262,6 +273,7 @@ model Message {
   status            MessageStatus        @default(SENT)
   externalMessageId String?
   provider          ConversationChannel?
+  metadata          Json?
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -286,6 +298,25 @@ model WidgetInstallation {
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
+}
+
+model EmailAccount {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  provider  EmailProvider      @default(RESEND)
+  fromEmail String
+  fromName  String?
+  status    EmailAccountStatus @default(ACTIVE)
+  metadata  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, fromEmail])
+  @@index([companyId, status])
 }
 
 model Ticket {

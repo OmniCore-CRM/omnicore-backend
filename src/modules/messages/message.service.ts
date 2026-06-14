@@ -59,13 +59,15 @@ export class MessageService {
             sender: data.sender,
             content: data.content,
             status:
-              conversation.channel === "WHATSAPP" &&
+              (conversation.channel === "WHATSAPP" ||
+                conversation.channel === "EMAIL") &&
               data.sender === "AGENT"
                 ? MessageStatus.PENDING
                 : MessageStatus.SENT,
             provider:
-              conversation.channel === "WHATSAPP"
-                ? "WHATSAPP"
+              conversation.channel === "WHATSAPP" ||
+              conversation.channel === "EMAIL"
+                ? conversation.channel
                 : null,
           },
         });
@@ -111,7 +113,11 @@ export class MessageService {
     }
 
     // Route outbound message through connected provider
-    if (conversation.channel === "WHATSAPP") {
+    if (
+      data.sender === "AGENT" &&
+      (conversation.channel === "WHATSAPP" ||
+        conversation.channel === "EMAIL")
+    ) {
       const providerMessage = await ChannelService.sendOutboundMessage({
         messageId: message.id,
         conversationId: conversation.id,
