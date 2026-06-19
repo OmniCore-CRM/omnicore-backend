@@ -1,10 +1,18 @@
 import { z } from "zod";
-import { ConversationChannel, ConversationStatus } from "@prisma/client";
+import {
+  ConversationChannel,
+  ConversationStatus,
+  TicketPriority,
+  TicketStatus,
+} from "@prisma/client";
 
 export const conversationListQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
   channel: z.enum(ConversationChannel).optional(),
   status: z.enum(ConversationStatus).optional(),
+  ticketStatus: z.enum(TicketStatus).optional(),
+  ticketPriority: z.enum(TicketPriority).optional(),
+  assigneeId: z.string().trim().min(1).max(128).optional(),
   teamId: z.string().trim().min(1).max(128).optional(),
   tagId: z.string().trim().min(1).max(128).optional(),
   cursor: z.string().trim().min(1).max(128).optional(),

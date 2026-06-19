@@ -9,6 +9,12 @@ const nullableIdSchema = z
   .nullable()
   .optional();
 
+const dateFilterSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Date filters must use YYYY-MM-DD")
+  .optional();
+
 export const ticketListQuerySchema = z.object({
   status: z.enum(TicketStatus).optional(),
   priority: z.enum(TicketPriority).optional(),
@@ -16,6 +22,8 @@ export const ticketListQuerySchema = z.object({
   teamId: z.string().trim().min(1).max(128).optional(),
   tagId: z.string().trim().min(1).max(128).optional(),
   slaStatus: z.enum(SlaStatus).optional(),
+  createdDate: dateFilterSchema,
+  updatedDate: dateFilterSchema,
   search: z.string().trim().max(200).optional(),
   cursor: z.string().trim().min(1).max(128).optional(),
   limit: z.coerce.number().int().positive().max(100).default(30),

@@ -124,6 +124,19 @@ const assertValidStatusTransition = (
   }
 };
 
+const dateRangeForDay = (value?: string): Prisma.DateTimeFilter | undefined => {
+  if (!value) return undefined;
+
+  const start = new Date(`${value}T00:00:00.000Z`);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+
+  return {
+    gte: start,
+    lt: end,
+  };
+};
+
 export class TicketService {
   static async getTickets(
     companyId: string,
@@ -138,18 +151,24 @@ export class TicketService {
     const searchPriority = Object.values(TicketPriority).find(
       (priority) => priority === normalizedSearch
     );
+    const createdAt = dateRangeForDay(query.createdDate);
+    const updatedAt = dateRangeForDay(query.updatedDate);
     const where: Prisma.TicketWhereInput = {
       companyId,
       ...(query.status ? { status: query.status } : {}),
       ...(query.priority ? { priority: query.priority } : {}),
       ...(query.assigneeId
-        ? { assigneeId: query.assigneeId }
+        ? query.assigneeId === "unassigned"
+          ? { assigneeId: null }
+          : { assigneeId: query.assigneeId }
         : {}),
       ...(query.teamId ? { teamId: query.teamId } : {}),
       ...(query.tagId
         ? { tags: { some: { companyId, tagId: query.tagId } } }
         : {}),
       ...(query.slaStatus ? { slaStatus: query.slaStatus } : {}),
+      ...(createdAt ? { createdAt } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
       ...(search
         ? {
             OR: [
@@ -223,32 +242,56 @@ export class TicketService {
         : {}),
     };
 
-    const tickets = await prisma.ticket.findMany({
-      where,
-      include: ticketInclude,
-      orderBy: [
-        {
-          updatedAt: "desc",
+    const [tickets, total, statusCounts] = await prisma.$transaction([
+      prisma.ticket.findMany({
+        where,
+        include: ticketInclude,
+        orderBy: [
+          {
+            updatedAt: "desc",
+          },
+          {
+            id: "desc",
+          },
+        ],
+        take: query.limit + 1,
+        ...(query.cursor
+          ? {
+              cursor: {
+                id: query.cursor,
+              },
+              skip: 1,
+            }
+          : {}),
+      }),
+      prisma.ticket.count({ where }),
+      prisma.ticket.groupBy({
+        by: ["status"],
+        where,
+        _count: {
+          _all: true,
         },
-        {
-          id: "desc",
-        },
-      ],
-      take: query.limit + 1,
-      ...(query.cursor
-        ? {
-            cursor: {
-              id: query.cursor,
-            },
-            skip: 1,
-          }
-        : {}),
-    });
+      }),
+    ]);
 
     const page = toPaginatedResult(tickets, query.limit);
+    const countByStatus = Object.fromEntries(
+      statusCounts.map((item) => [item.status, item._count._all])
+    ) as Partial<Record<TicketStatus, number>>;
 
     return {
       ...page,
+      total,
+      summary: {
+        total,
+        openPending:
+          (countByStatus[TicketStatus.OPEN] ?? 0) +
+          (countByStatus[TicketStatus.PENDING] ?? 0),
+        escalated: countByStatus[TicketStatus.ESCALATED] ?? 0,
+        resolvedClosed:
+          (countByStatus[TicketStatus.RESOLVED] ?? 0) +
+          (countByStatus[TicketStatus.CLOSED] ?? 0),
+      },
       items: mapTickets(page.items),
     };
   }
