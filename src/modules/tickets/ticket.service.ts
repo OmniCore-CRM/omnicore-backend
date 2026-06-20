@@ -42,6 +42,13 @@ const ticketInclude = {
   },
 } satisfies Prisma.TicketInclude;
 
+const ticketListInclude = {
+  assignee: true,
+  team: true,
+  customer: true,
+  conversation: true,
+} satisfies Prisma.TicketInclude;
+
 const ticketDetailInclude = {
   ...ticketInclude,
   conversation: {
@@ -142,7 +149,9 @@ export class TicketService {
     companyId: string,
     query: TicketListQueryInput
   ) {
-    await TicketSlaService.refreshCompanyTickets(companyId);
+    if (query.slaStatus) {
+      await TicketSlaService.refreshCompanyTickets(companyId);
+    }
     const search = query.search?.trim();
     const normalizedSearch = search?.toUpperCase();
     const searchStatus = Object.values(TicketStatus).find(
@@ -242,10 +251,10 @@ export class TicketService {
         : {}),
     };
 
-    const [tickets, total, statusCounts] = await prisma.$transaction([
+    const [tickets, total, statusCounts] = await Promise.all([
       prisma.ticket.findMany({
         where,
-        include: ticketInclude,
+        include: ticketListInclude,
         orderBy: [
           {
             updatedAt: "desc",

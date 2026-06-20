@@ -2,7 +2,8 @@ import {
   ConversationActivityAction,
   ConversationChannel,
   ConversationStatus,
-  type Prisma,
+  Prisma,
+  type Message,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
@@ -221,26 +222,6 @@ export class ConversationService {
       include: {
         customer: true,
         team: true,
-        messages: {
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          take: 1,
-        },
-        attachments: {
-          include: {
-            uploadedBy: true,
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-        tags: {
-          include: {
-            tag: true,
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
         tickets: {
           include: {
             assignee: true,
@@ -278,10 +259,41 @@ export class ConversationService {
     });
 
     const page = toPaginatedResult(conversations, params.limit);
+    const conversationIds = page.items.map((conversation) => conversation.id);
+    const latestMessages = conversationIds.length
+      ? await prisma.$queryRaw<Message[]>`
+          SELECT DISTINCT ON ("conversationId")
+            "id",
+            "companyId",
+            "conversationId",
+            "sender",
+            "content",
+            "status",
+            "externalMessageId",
+            "provider",
+            "metadata",
+            "createdAt",
+            "updatedAt"
+          FROM "Message"
+          WHERE "companyId" = ${companyId}
+            AND "conversationId" IN (${Prisma.join(conversationIds)})
+          ORDER BY "conversationId", "createdAt" DESC, "id" DESC
+        `
+      : [];
+    const latestMessageByConversationId = new Map(
+      latestMessages.map((message) => [message.conversationId, message])
+    );
+    const items = page.items.map((conversation) => ({
+      ...conversation,
+      messages: latestMessageByConversationId.has(conversation.id)
+        ? [latestMessageByConversationId.get(conversation.id)!]
+        : [],
+      attachments: [],
+    }));
 
     return {
       ...page,
-      items: mapConversations(page.items),
+      items: mapConversations(items),
     };
   }
 
