@@ -20,7 +20,7 @@ type ConversationWithMessages = Conversation & {
 
 type TicketWithRelations = Ticket & {
   assignee?: User | null;
-  createdBy: User;
+  createdBy?: User | null;
   customer?: Customer | null;
   conversation?: ConversationWithMessages | null;
   notes?: TicketNoteWithAuthor[];

@@ -61,7 +61,7 @@ export class AnalyticsService {
       conversationsByTeam,
       teams,
       recentActivity,
-    ] = await prisma.$transaction([
+    ] = await Promise.all([
       prisma.customer.count({ where: customerWhere }),
       prisma.conversation.groupBy({
         by: ["status"],
