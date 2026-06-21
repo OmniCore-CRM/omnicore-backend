@@ -12,28 +12,64 @@ import type {
 } from "@prisma/client";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 
+type SafeUser = Pick<
+  User,
+  "id" | "email" | "firstName" | "lastName" | "role"
+>;
+type SafeCustomer = Pick<
+  Customer,
+  "id" | "firstName" | "lastName" | "email" | "phone"
+>;
+type SafeTeam = Pick<Team, "id" | "name" | "description">;
+type SafeTag = Pick<
+  Tag,
+  "id" | "companyId" | "name" | "color" | "createdAt" | "updatedAt"
+>;
+type SafeMessage = Pick<
+  Message,
+  | "id"
+  | "companyId"
+  | "conversationId"
+  | "sender"
+  | "content"
+  | "status"
+  | "provider"
+  | "createdAt"
+  | "updatedAt"
+> &
+  Partial<Pick<Message, "externalMessageId" | "metadata">> & {
+    attachments?: (Attachment & { uploadedBy?: SafeUser | null })[];
+  };
+
 // Conversation payload with related entities
 type ConversationWithRelations = Conversation & {
-  customer: Customer;
-  messages?: (Message & {
-    attachments?: (Attachment & { uploadedBy?: User | null })[];
-  })[];
-  attachments?: (Attachment & { uploadedBy?: User | null })[];
-  tags?: (ConversationTag & { tag: Tag })[];
+  customer: SafeCustomer;
+  messages?: SafeMessage[];
+  attachments?: (Attachment & { uploadedBy?: SafeUser | null })[];
+  tags?: (Pick<ConversationTag, "createdAt"> & { tag: SafeTag })[];
   activities?: ConversationActivityWithActor[];
-  team?: Team | null;
+  team?: SafeTeam | null;
   tickets?: ConversationTicketWithRelations[];
 };
 
 type ConversationActivityWithActor = ConversationActivity & {
-  actor: User | null;
+  actor: SafeUser | null;
 };
 
-type ConversationTicketWithRelations = Ticket & {
-  assignee?: User | null;
+type ConversationTicketWithRelations = Pick<
+  Ticket,
+  | "id"
+  | "subject"
+  | "status"
+  | "priority"
+  | "assigneeId"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  assignee?: SafeUser | null;
 };
 
-const mapTag = (tag: Tag) => ({
+const mapTag = (tag: SafeTag) => ({
   id: tag.id,
   companyId: tag.companyId,
   name: tag.name,
@@ -42,7 +78,7 @@ const mapTag = (tag: Tag) => ({
   updatedAt: tag.updatedAt,
 });
 
-const mapUserSummary = (user?: User | null) =>
+const mapUserSummary = (user?: SafeUser | null) =>
   user
     ? {
   id: user.id,

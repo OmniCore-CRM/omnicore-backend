@@ -1,7 +1,9 @@
 import type { Attachment, User } from "@prisma/client";
 
+type AttachmentUploader = Pick<User, "id" | "firstName" | "lastName">;
+
 type AttachmentWithUploader = Attachment & {
-  uploadedBy?: User | null;
+  uploadedBy?: AttachmentUploader | null;
 };
 
 export const mapAttachment = (attachment: AttachmentWithUploader) => ({

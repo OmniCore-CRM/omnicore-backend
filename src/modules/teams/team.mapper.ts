@@ -1,13 +1,28 @@
 import type { Team, TeamMember, User } from "@prisma/client";
 
+type SafeUser = Pick<
+  User,
+  "id" | "email" | "firstName" | "lastName"
+> & {
+  role: User["role"] | string;
+};
+
 type TeamWithRelations = Team & {
-  members?: (TeamMember & { user: User })[];
+  members?: (Omit<
+    Pick<TeamMember, "teamId" | "userId" | "createdAt">,
+    "createdAt"
+  > & {
+    createdAt: TeamMember["createdAt"] | string;
+    user: SafeUser;
+  })[];
   _count?: {
     tickets: number;
     conversations: number;
   };
-  tickets?: { status: string }[];
-  conversations?: { status: string }[];
+  ticketCount?: number;
+  conversationCount?: number;
+  openTicketCount?: number;
+  openConversationCount?: number;
 };
 
 export const mapTeamSummary = (team?: Team | null) => {
@@ -33,16 +48,10 @@ export const mapTeam = (team: TeamWithRelations) => ({
       role: user.role,
       displayName: [user.firstName, user.lastName].filter(Boolean).join(" "),
     })) ?? [],
-  ticketCount: team._count?.tickets ?? 0,
-  conversationCount: team._count?.conversations ?? 0,
-  openTicketCount:
-    team.tickets?.filter((ticket) =>
-      ["OPEN", "PENDING", "ESCALATED"].includes(ticket.status)
-    ).length ?? 0,
-  openConversationCount:
-    team.conversations?.filter((conversation) =>
-      ["OPEN", "PENDING", "SNOOZED"].includes(conversation.status)
-    ).length ?? 0,
+  ticketCount: team.ticketCount ?? team._count?.tickets ?? 0,
+  conversationCount: team.conversationCount ?? team._count?.conversations ?? 0,
+  openTicketCount: team.openTicketCount ?? 0,
+  openConversationCount: team.openConversationCount ?? 0,
   createdAt: team.createdAt,
   updatedAt: team.updatedAt,
 });

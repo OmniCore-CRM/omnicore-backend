@@ -29,6 +29,94 @@ type UserContext = {
   role: string;
 };
 
+type LatestConversationMessage = Pick<
+  Message,
+  | "id"
+  | "companyId"
+  | "conversationId"
+  | "sender"
+  | "content"
+  | "status"
+  | "provider"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
+const conversationListSelect = {
+  id: true,
+  companyId: true,
+  customerId: true,
+  channel: true,
+  status: true,
+  subject: true,
+  teamId: true,
+  createdAt: true,
+  updatedAt: true,
+  customer: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+    },
+  },
+  team: {
+    select: {
+      id: true,
+      name: true,
+      description: true,
+    },
+  },
+  tags: {
+    select: {
+      createdAt: true,
+      tag: {
+        select: {
+          id: true,
+          companyId: true,
+          name: true,
+          color: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  },
+  tickets: {
+    select: {
+      id: true,
+      subject: true,
+      status: true,
+      priority: true,
+      assigneeId: true,
+      createdAt: true,
+      updatedAt: true,
+      assignee: {
+        select: safeUserSelect,
+      },
+    },
+    orderBy: [
+      {
+        updatedAt: "desc",
+      },
+      {
+        id: "desc",
+      },
+    ],
+    take: 1,
+  },
+} satisfies Prisma.ConversationSelect;
+
 const assertCanMutate = (user: UserContext) => {
   if (user.role === "VIEWER") {
     throw new AppError(
@@ -36,6 +124,94 @@ const assertCanMutate = (user: UserContext) => {
       HTTP_STATUS.FORBIDDEN
     );
   }
+};
+
+type ConversationListRow = {
+  id: string;
+  companyId: string;
+  customerId: string;
+  channel: ConversationChannel;
+  status: ConversationStatus;
+  subject: string | null;
+  teamId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  customer: {
+    id: string;
+    firstName: string;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+  };
+  team: {
+    id: string;
+    name: string;
+    description: string | null;
+  } | null;
+  tags: Array<{
+    id: string;
+    companyId: string;
+    name: string;
+    color: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  tickets: Array<{
+    id: string;
+    subject: string;
+    status: string;
+    priority: string;
+    assigneeId: string | null;
+    assignee: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      role: string;
+      displayName: string;
+    } | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  latestMessage: {
+    id: string;
+    companyId: string;
+    conversationId: string;
+    sender: string;
+    content: string;
+    status: string;
+    provider: string | null;
+    createdAt: string;
+    updatedAt: string;
+  } | null;
+};
+
+const mapConversationListRow = (row: ConversationListRow) => {
+  const latestMessage = row.latestMessage;
+
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    customerId: row.customerId,
+    channel: row.channel,
+    status: row.status,
+    subject: row.subject,
+    teamId: row.teamId,
+    team: row.team,
+    tickets: row.tickets ?? [],
+    primaryTicket: row.tickets?.[0] ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    lastMessage: latestMessage,
+    latestMessage,
+    lastMessagePreview: latestMessage?.content ?? null,
+    lastMessageAt: latestMessage?.createdAt ?? null,
+    customer: row.customer,
+    messages: latestMessage ? [latestMessage] : [],
+    attachments: [],
+    tags: row.tags ?? [],
+    activities: undefined,
+  };
 };
 
 export class ConversationService {
@@ -216,27 +392,164 @@ export class ConversationService {
         : {}),
     };
 
+    const canUseFastList =
+      !search &&
+      !linkedTicketFilter &&
+      !params.tagId &&
+      !params.cursor;
+
+    if (canUseFastList) {
+      const conditions: Prisma.Sql[] = [
+        Prisma.sql`c."companyId" = ${companyId}`,
+      ];
+
+      if (params.channel) {
+        conditions.push(Prisma.sql`c."channel" = ${params.channel}::"ConversationChannel"`);
+      }
+      if (params.status) {
+        conditions.push(Prisma.sql`c."status" = ${params.status}::"ConversationStatus"`);
+      }
+      if (params.teamId) {
+        conditions.push(Prisma.sql`c."teamId" = ${params.teamId}`);
+      }
+
+      const rows = await prisma.$queryRaw<ConversationListRow[]>`
+        WITH page AS (
+          SELECT
+            c."id",
+            c."companyId",
+            c."customerId",
+            c."channel",
+            c."status",
+            c."subject",
+            c."teamId",
+            c."createdAt",
+            c."updatedAt"
+          FROM "Conversation" c
+          WHERE ${Prisma.join(conditions, " AND ")}
+          ORDER BY c."updatedAt" DESC, c."id" DESC
+          LIMIT ${params.limit + 1}
+        )
+        SELECT
+          page."id",
+          page."companyId",
+          page."customerId",
+          page."channel",
+          page."status",
+          page."subject",
+          page."teamId",
+          page."createdAt",
+          page."updatedAt",
+          json_build_object(
+            'id', customer."id",
+            'firstName', customer."firstName",
+            'lastName', customer."lastName",
+            'email', customer."email",
+            'phone', customer."phone"
+          ) AS "customer",
+          CASE
+            WHEN team."id" IS NULL THEN NULL
+            ELSE json_build_object(
+              'id', team."id",
+              'name', team."name",
+              'description', team."description"
+            )
+          END AS "team",
+          COALESCE(tags."items", '[]'::json) AS "tags",
+          COALESCE(ticket_summary."items", '[]'::json) AS "tickets",
+          latest_message."item" AS "latestMessage"
+        FROM page
+        JOIN "Customer" customer
+          ON customer."id" = page."customerId"
+         AND customer."companyId" = ${companyId}
+        LEFT JOIN "Team" team
+          ON team."id" = page."teamId"
+         AND team."companyId" = ${companyId}
+        LEFT JOIN LATERAL (
+          SELECT json_agg(
+            json_build_object(
+              'id', tag."id",
+              'companyId', tag."companyId",
+              'name', tag."name",
+              'color', tag."color",
+              'createdAt', tag."createdAt",
+              'updatedAt', tag."updatedAt"
+            )
+            ORDER BY ct."createdAt" ASC
+          ) AS "items"
+          FROM "ConversationTag" ct
+          JOIN "Tag" tag
+            ON tag."id" = ct."tagId"
+           AND tag."companyId" = ${companyId}
+          WHERE ct."conversationId" = page."id"
+            AND ct."companyId" = ${companyId}
+        ) tags ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT json_agg(ticket_item."item") AS "items"
+          FROM (
+            SELECT json_build_object(
+              'id', ticket."id",
+              'subject', ticket."subject",
+              'status', ticket."status",
+              'priority', ticket."priority",
+              'assigneeId', ticket."assigneeId",
+              'assignee',
+                CASE
+                  WHEN assignee."id" IS NULL THEN NULL
+                  ELSE json_build_object(
+                    'id', assignee."id",
+                    'email', assignee."email",
+                    'firstName', assignee."firstName",
+                    'lastName', assignee."lastName",
+                    'role', assignee."role",
+                    'displayName',
+                      concat_ws(' ', assignee."firstName", assignee."lastName")
+                  )
+                END,
+              'createdAt', ticket."createdAt",
+              'updatedAt', ticket."updatedAt"
+            ) AS "item"
+            FROM "Ticket" ticket
+            LEFT JOIN "User" assignee
+              ON assignee."id" = ticket."assigneeId"
+             AND assignee."companyId" = ${companyId}
+            WHERE ticket."conversationId" = page."id"
+              AND ticket."companyId" = ${companyId}
+            ORDER BY ticket."updatedAt" DESC, ticket."id" DESC
+            LIMIT 1
+          ) ticket_item
+        ) ticket_summary ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT json_build_object(
+            'id', message."id",
+            'companyId', message."companyId",
+            'conversationId', message."conversationId",
+            'sender', message."sender",
+            'content', message."content",
+            'status', message."status",
+            'provider', message."provider",
+            'createdAt', message."createdAt",
+            'updatedAt', message."updatedAt"
+          ) AS "item"
+          FROM "Message" message
+          WHERE message."conversationId" = page."id"
+            AND message."companyId" = ${companyId}
+          ORDER BY message."createdAt" DESC, message."id" DESC
+          LIMIT 1
+        ) latest_message ON TRUE
+        ORDER BY page."updatedAt" DESC, page."id" DESC
+      `;
+
+      const page = toPaginatedResult(rows, params.limit);
+      return {
+        ...page,
+        items: page.items.map(mapConversationListRow),
+      };
+    }
+
     const conversations = await prisma.conversation.findMany({
       where,
-
-      include: {
-        customer: true,
-        team: true,
-        tickets: {
-          include: {
-            assignee: true,
-          },
-          orderBy: [
-            {
-              updatedAt: "desc",
-            },
-            {
-              id: "desc",
-            },
-          ],
-          take: 1,
-        },
-      },
+      select: conversationListSelect,
 
       orderBy: [
         {
@@ -261,7 +574,7 @@ export class ConversationService {
     const page = toPaginatedResult(conversations, params.limit);
     const conversationIds = page.items.map((conversation) => conversation.id);
     const latestMessages = conversationIds.length
-      ? await prisma.$queryRaw<Message[]>`
+      ? await prisma.$queryRaw<LatestConversationMessage[]>`
           SELECT DISTINCT ON ("conversationId")
             "id",
             "companyId",
@@ -269,9 +582,7 @@ export class ConversationService {
             "sender",
             "content",
             "status",
-            "externalMessageId",
             "provider",
-            "metadata",
             "createdAt",
             "updatedAt"
           FROM "Message"

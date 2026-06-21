@@ -52,6 +52,14 @@ export class TagService {
             }
           : {}),
       },
+      select: {
+        id: true,
+        companyId: true,
+        name: true,
+        color: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: [
         {
           name: "asc",
