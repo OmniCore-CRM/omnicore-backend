@@ -19,6 +19,39 @@ import type {
 
 type UserContext = { userId: string; companyId: string; role: string };
 
+type TeamListRow = {
+  id: string;
+  companyId: string;
+  name: string;
+  description: string | null;
+  members: Array<{
+    teamId: string;
+    userId: string;
+    createdAt: string;
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      role: string;
+    };
+  }>;
+  ticketCount: number;
+  conversationCount: number;
+  openTicketCount: number;
+  openConversationCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+const mapTeamListRow = (row: TeamListRow) => ({
+  ...row,
+  ticketCount: Number(row.ticketCount),
+  conversationCount: Number(row.conversationCount),
+  openTicketCount: Number(row.openTicketCount),
+  openConversationCount: Number(row.openConversationCount),
+});
+
 const managementRoles = new Set(["OWNER", "ADMIN", "TEAM_LEAD"]);
 const assertCanManageTeams = (user: UserContext) => {
   if (!managementRoles.has(user.role)) {
@@ -31,27 +64,90 @@ const assertCanAssign = (user: UserContext) => {
   }
 };
 
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
 const teamInclude = {
-  members: { include: { user: true }, orderBy: { createdAt: "asc" } },
-  _count: { select: { tickets: true, conversations: true } },
-  tickets: {
-    where: { status: { in: ["OPEN", "PENDING", "ESCALATED"] } },
-    select: { status: true },
-  },
-  conversations: {
-    where: { status: { in: ["OPEN", "PENDING", "SNOOZED"] } },
-    select: { status: true },
+  members: {
+    select: {
+      teamId: true,
+      userId: true,
+      createdAt: true,
+      user: { select: safeUserSelect },
+    },
+    orderBy: { createdAt: "asc" },
   },
 } satisfies Prisma.TeamInclude;
 
 export class TeamService {
   static async list(companyId: string) {
-    const teams = await prisma.team.findMany({
-      where: { companyId },
-      include: teamInclude,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-    });
-    return mapTeams(teams);
+    const teams = await prisma.$queryRaw<TeamListRow[]>`
+      SELECT
+        team."id",
+        team."companyId",
+        team."name",
+        team."description",
+        COALESCE(members."items", '[]'::json) AS "members",
+        COALESCE(ticket_counts."total", 0)::int AS "ticketCount",
+        COALESCE(conversation_counts."total", 0)::int AS "conversationCount",
+        COALESCE(ticket_counts."open", 0)::int AS "openTicketCount",
+        COALESCE(conversation_counts."open", 0)::int AS "openConversationCount",
+        team."createdAt",
+        team."updatedAt"
+      FROM "Team" team
+      LEFT JOIN LATERAL (
+        SELECT json_agg(
+          json_build_object(
+            'teamId', member."teamId",
+            'userId', member."userId",
+            'createdAt', member."createdAt",
+            'user', json_build_object(
+              'id', user_account."id",
+              'email', user_account."email",
+              'firstName', user_account."firstName",
+              'lastName', user_account."lastName",
+              'role', user_account."role"
+            )
+          )
+          ORDER BY member."createdAt" ASC
+        ) AS "items"
+        FROM "TeamMember" member
+        JOIN "User" user_account
+          ON user_account."id" = member."userId"
+         AND user_account."companyId" = ${companyId}
+        WHERE member."teamId" = team."id"
+          AND member."companyId" = ${companyId}
+      ) members ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) AS "total",
+          COUNT(*) FILTER (
+            WHERE ticket."status" IN ('OPEN', 'PENDING', 'ESCALATED')
+          ) AS "open"
+        FROM "Ticket" ticket
+        WHERE ticket."teamId" = team."id"
+          AND ticket."companyId" = ${companyId}
+      ) ticket_counts ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) AS "total",
+          COUNT(*) FILTER (
+            WHERE conversation."status" IN ('OPEN', 'PENDING', 'SNOOZED')
+          ) AS "open"
+        FROM "Conversation" conversation
+        WHERE conversation."teamId" = team."id"
+          AND conversation."companyId" = ${companyId}
+      ) conversation_counts ON TRUE
+      WHERE team."companyId" = ${companyId}
+      ORDER BY team."name" ASC, team."id" ASC
+    `;
+
+    return mapTeams(teams.map(mapTeamListRow));
   }
 
   static async create(user: UserContext, data: CreateTeamInput) {

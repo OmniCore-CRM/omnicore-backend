@@ -12,6 +12,10 @@ import { accessLogMiddleware } from "@/core/middleware/access-log.middleware.js"
 
 const app = express();
 
+// Express generates ETags after route handlers finish, which made dynamic API
+// 304 responses wait on full database work. Frontend caching handles freshness.
+app.set("etag", false);
+
 // Security middleware
 app.use(
   cors({
