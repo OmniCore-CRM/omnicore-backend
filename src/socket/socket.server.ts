@@ -10,6 +10,7 @@ interface SocketUser {
   userId: string;
   companyId: string;
   role: string;
+  sessionId: string;
 }
 
 type AgentSocketData = SocketUser & {
@@ -114,14 +115,40 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
         return next();
       }
 
-      if (!decoded.userId || !decoded.companyId || !decoded.role) {
+      if (!decoded.userId || !decoded.companyId || !decoded.role || !decoded.sessionId) {
         return next(new Error("Invalid token"));
       }
 
+      const session = await prisma.authSession.findFirst({
+        where: {
+          id: decoded.sessionId,
+          userId: decoded.userId,
+          companyId: decoded.companyId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              companyId: true,
+              role: true,
+              isActive: true,
+              company: { select: { id: true, isActive: true } },
+            },
+          },
+        },
+      });
+
+      if (!session?.user.isActive || !session.user.company.isActive) {
+        return next(new Error("Invalid or expired token"));
+      }
+
       socket.data.authType = "agent";
-      socket.data.userId = decoded.userId;
-      socket.data.companyId = decoded.companyId;
-      socket.data.role = decoded.role;
+      socket.data.userId = session.user.id;
+      socket.data.companyId = session.user.companyId;
+      socket.data.role = session.user.role;
+      socket.data.sessionId = session.id;
 
       next();
     } catch {
