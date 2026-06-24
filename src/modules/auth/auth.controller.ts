@@ -5,58 +5,96 @@ import { AuthService } from "./auth.service.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
 import type { AuthenticatedUser } from "./auth.validation.js";
+import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
+import {
+  clearRefreshCookie,
+  REFRESH_COOKIE_NAME,
+  setRefreshCookie,
+} from "./auth.utils.js";
+
+const sendIssuedAuth = ({
+  res,
+  statusCode,
+  message,
+  issued,
+}: {
+  res: Response;
+  statusCode: number;
+  message: string;
+  issued: Awaited<ReturnType<typeof AuthService.login>>;
+}) => {
+  setRefreshCookie(res, issued.refreshToken, issued.refreshExpiresAt);
+
+  return sendResponse({
+    res,
+    statusCode,
+    message,
+    data: issued.auth,
+  });
+};
 
 export class AuthController {
-  // Register new company + owner account
   static register = asyncHandler(async (req: Request, res: Response) => {
-    // Pass validated data into service layer
-    const user = await AuthService.register(req.body);
+    const issued = await AuthService.register(req.body);
 
-    // Send consistent API response
-    return sendResponse({
+    return sendIssuedAuth({
       res,
       statusCode: HTTP_STATUS.CREATED,
       message: "Account created successfully",
-      data: user,
+      issued,
     });
   });
 
-  // Login controller (Login existing user)
   static login = asyncHandler(async (req: Request, res: Response) => {
-    // Authenticate user credentials
-    const result = await AuthService.login(req.body);
+    const issued = await AuthService.login(req.body);
 
-    // Send authenticated response
-    return sendResponse({
+    return sendIssuedAuth({
       res,
       statusCode: HTTP_STATUS.OK,
       message: "Login successful",
-      data: result,
+      issued,
     });
   });
 
-  // ===== Return authenticated session user =====
+  static refresh = asyncHandler(async (req: Request, res: Response) => {
+    const issued = await AuthService.refresh(req.cookies?.[REFRESH_COOKIE_NAME]);
+
+    return sendIssuedAuth({
+      res,
+      statusCode: HTTP_STATUS.OK,
+      message: "Session refreshed successfully",
+      issued,
+    });
+  });
+
+  static logout = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    await AuthService.logout({
+      refreshToken: req.cookies?.[REFRESH_COOKIE_NAME],
+      sessionId: req.user?.sessionId,
+    });
+    clearRefreshCookie(res);
+
+    return sendResponse({
+      res,
+      statusCode: HTTP_STATUS.OK,
+      message: "Logged out successfully",
+    });
+  });
+
   static me = asyncHandler(
     async (
-      req: Request & {
-        user?: AuthenticatedUser;
-      },
+      req: Request & { user?: AuthenticatedUser },
       res: Response
     ) => {
-      // Ensure authenticated user exists
       if (!req.user) {
-        throw new AppError(
-          "Unauthorized",
-          HTTP_STATUS.UNAUTHORIZED
-        );
+        throw new AppError("Unauthorized", HTTP_STATUS.UNAUTHORIZED);
       }
-      // Fetch authenticated tenant user
+
       const result = await AuthService.getCurrentUser(
         req.user.userId,
         req.user.companyId
       );
 
-      // Send authenticated session response
       return sendResponse({
         res,
         statusCode: HTTP_STATUS.OK,

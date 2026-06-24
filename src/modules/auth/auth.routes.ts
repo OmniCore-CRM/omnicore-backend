@@ -2,13 +2,11 @@ import { Router } from "express";
 import { AuthController } from "./auth.controller.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { registerSchema, loginSchema } from "./auth.validation.js";
-import authTestRoutes from "./auth.test.routes.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 
 const router = Router();
 
-// Auth routes
 router.post(
   "/register",
   rateLimit({
@@ -31,13 +29,18 @@ router.post(
   AuthController.login
 );
 
-// Authenticated session route
-router.get(
-  "/me",
-  protect,
-  AuthController.me
+router.post(
+  "/refresh",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 120,
+    keyPrefix: "auth:refresh",
+  }),
+  AuthController.refresh
 );
 
-router.use(authTestRoutes);
+router.post("/logout", AuthController.logout);
+
+router.get("/me", protect, AuthController.me);
 
 export default router;

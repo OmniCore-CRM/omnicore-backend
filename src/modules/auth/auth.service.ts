@@ -1,30 +1,83 @@
 import bcrypt from "bcrypt";
+import type { Company, Prisma, User } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import type { RegisterInput, LoginInput } from "./auth.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
-import { generateAccessToken } from "./auth.utils.js";
+import {
+  createRefreshExpiry,
+  createRefreshToken,
+  generateAccessToken,
+  hashRefreshToken,
+} from "./auth.utils.js";
 import { mapAuthResponse } from "./auth.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 
-export class AuthService {
-  // ===== Register new company owner =====
-  static async register(data: RegisterInput) {
-    const {
-      companyName,
-      firstName,
-      lastName,
-      email,
-      password,
-    } = data;
+type UserWithCompany = User & { company: Company };
+type IssuedAuth = {
+  auth: ReturnType<typeof mapAuthResponse>;
+  refreshToken: string;
+  refreshExpiresAt: Date;
+};
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: {
-        email,
+const invalidSessionError = () =>
+  new AppError("Session expired", HTTP_STATUS.UNAUTHORIZED);
+
+export class AuthService {
+  private static async issueSession(
+    tx: Prisma.TransactionClient,
+    user: Pick<User, "id" | "companyId" | "role">
+  ) {
+    const refreshToken = createRefreshToken();
+    const refreshExpiresAt = createRefreshExpiry();
+    const session = await tx.authSession.create({
+      data: {
+        userId: user.id,
+        companyId: user.companyId,
+        tokenHash: hashRefreshToken(refreshToken),
+        expiresAt: refreshExpiresAt,
       },
+      select: { id: true },
     });
 
+    return {
+      refreshToken,
+      refreshExpiresAt,
+      accessToken: generateAccessToken({
+        userId: user.id,
+        companyId: user.companyId,
+        role: user.role,
+        sessionId: session.id,
+      }),
+    };
+  }
+
+  private static assertActive(user: UserWithCompany) {
+    if (!user.isActive || !user.company.isActive) {
+      throw invalidSessionError();
+    }
+  }
+
+  private static toIssuedAuth(
+    user: UserWithCompany,
+    issued: Awaited<ReturnType<typeof AuthService.issueSession>>
+  ): IssuedAuth {
+    return {
+      auth: mapAuthResponse({
+        accessToken: issued.accessToken,
+        user,
+        company: user.company,
+      }),
+      refreshToken: issued.refreshToken,
+      refreshExpiresAt: issued.refreshExpiresAt,
+    };
+  }
+
+  // ===== Register new company owner =====
+  static async register(data: RegisterInput): Promise<IssuedAuth> {
+    const { companyName, firstName, lastName, email, password } = data;
+
+    const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       throw new AppError(
         "User with this email already exists",
@@ -32,91 +85,50 @@ export class AuthService {
       );
     }
 
-    // Hash password before saving to database
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create company + owner account atomically
-    const { company, user } = await prisma.$transaction(
-      async (tx) => {
-        // Create tenant company first
-        const company = await tx.company.create({
-          data: {
-            name: companyName,
-          },
-        });
-        
-        // Create owner account linked to company
-        const user = await tx.user.create({
-          data: {
-            firstName,
-            lastName,
-            email,
-            passwordHash,
-            role: "OWNER",
-            companyId: company.id,
-          },
-        });
-
-        return { company, user };
-      }
-    );
-
-    // Generate authenticated access token
-    const accessToken = generateAccessToken(
-      user.id,
-      user.companyId,
-      user.role
-    );
-
-    // Return normalized authenticated onboarding payload
-    return mapAuthResponse({
-      accessToken,
-      user,
-      company
+    const result = await prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({ data: { name: companyName } });
+      const user = await tx.user.create({
+        data: {
+          firstName,
+          lastName,
+          email,
+          passwordHash,
+          role: "OWNER",
+          companyId: company.id,
+        },
+        include: { company: true },
+      });
+      const issued = await this.issueSession(tx, user);
+      return { user, issued };
     });
+
+    return this.toIssuedAuth(result.user, result.issued);
   }
-  
+
   // ===== Login Logic (Authenticate existing user) =====
-  static async login(data: LoginInput) {
+  static async login(data: LoginInput): Promise<IssuedAuth> {
     const { email, password } = data;
 
-    // Find user by email
     const user = await prisma.user.findUnique({
-      where: {
-        email,
-      },
-
-      include: {
-        company: true,
-      },
+      where: { email },
+      include: { company: true },
     });
 
-    // Prevent leaking whether email exists
     if (!user) {
-      throw new AppError(
-        "Invalid email or password",
-        HTTP_STATUS.UNAUTHORIZED
-      );
+      throw new AppError("Invalid email or password", HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // Compare incoming password with stored hash
-    const isPasswordCorrect = await bcrypt.compare(
-      password,
-      user.passwordHash
-    );
-
+    const isPasswordCorrect = await bcrypt.compare(password, user.passwordHash);
     if (!isPasswordCorrect) {
-      throw new AppError(
-        "Invalid email or password",
-        HTTP_STATUS.UNAUTHORIZED
-      );
+      throw new AppError("Invalid email or password", HTTP_STATUS.UNAUTHORIZED);
     }
 
-    // Generate authenticated access token
-    const accessToken = generateAccessToken(
-      user.id,
-      user.companyId,
-      user.role
+    this.assertActive(user);
+
+    const issued = await prisma.$transaction(async (tx) =>
+      this.issueSession(tx, user)
     );
 
     await AuditLogService.record({
@@ -125,49 +137,90 @@ export class AuthService {
       action: "USER_LOGIN",
       entityType: "USER",
       entityId: user.id,
-      metadata: {
-        role: user.role,
-      },
+      metadata: { role: user.role },
     });
 
-    // Return normalized authenticated session payload
-    return mapAuthResponse({
-      accessToken,
-      user,
-      company: user.company,
+    return this.toIssuedAuth(user, issued);
+  }
+
+  static async refresh(refreshToken: string | undefined): Promise<IssuedAuth> {
+    if (!refreshToken) throw invalidSessionError();
+
+    const now = new Date();
+    const tokenHash = hashRefreshToken(refreshToken);
+    const session = await prisma.authSession.findUnique({
+      where: { tokenHash },
+      include: { user: { include: { company: true } } },
     });
+
+    if (!session || session.revokedAt || session.expiresAt <= now) {
+      throw invalidSessionError();
+    }
+
+    this.assertActive(session.user);
+
+    const nextRefreshToken = createRefreshToken();
+    const nextRefreshExpiresAt = createRefreshExpiry();
+    const updated = await prisma.authSession.update({
+      where: { id: session.id },
+      data: {
+        tokenHash: hashRefreshToken(nextRefreshToken),
+        expiresAt: nextRefreshExpiresAt,
+      },
+      select: { id: true },
+    });
+
+    const accessToken = generateAccessToken({
+      userId: session.user.id,
+      companyId: session.user.companyId,
+      role: session.user.role,
+      sessionId: updated.id,
+    });
+
+    return {
+      auth: mapAuthResponse({
+        accessToken,
+        user: session.user,
+        company: session.user.company,
+      }),
+      refreshToken: nextRefreshToken,
+      refreshExpiresAt: nextRefreshExpiresAt,
+    };
+  }
+
+  static async logout(input: { refreshToken?: string; sessionId?: string }) {
+    const now = new Date();
+
+    if (input.refreshToken) {
+      await prisma.authSession.updateMany({
+        where: { tokenHash: hashRefreshToken(input.refreshToken), revokedAt: null },
+        data: { revokedAt: now },
+      });
+      return;
+    }
+
+    if (input.sessionId) {
+      await prisma.authSession.updateMany({
+        where: { id: input.sessionId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+    }
   }
 
   // ===== Return authenticated session user =====
-  static async getCurrentUser(
-    userId: string,
-    companyId: string
-  ) {
-    // Find authenticated tenant user
+  static async getCurrentUser(userId: string, companyId: string) {
     const user = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId,
-      },
-
-      include: {
-        company: true,
-      },
+      where: { id: userId, companyId, isActive: true, company: { isActive: true } },
+      include: { company: true },
     });
 
-    // Prevent invalid tenant access
     if (!user) {
-      throw new AppError(
-        "User not found",
-        HTTP_STATUS.NOT_FOUND
-      );
+      throw new AppError("User not found", HTTP_STATUS.NOT_FOUND);
     }
 
-    // Return normalized authenticated session payload
-    return mapAuthResponse({
-      accessToken: "",
-      user,
-      company: user.company,
-    });
+    return {
+      user: mapAuthResponse({ accessToken: "", user, company: user.company }).user,
+      company: mapAuthResponse({ accessToken: "", user, company: user.company }).company,
+    };
   }
 }

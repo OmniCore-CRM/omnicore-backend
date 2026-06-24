@@ -117,8 +117,9 @@ enum EmailAccountStatus {
 }
 
 model Company {
-  id   String @id @default(cuid())
-  name String
+  id       String  @id @default(cuid())
+  name     String
+  isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -144,6 +145,7 @@ model Company {
   slaPolicies            SlaPolicy[]
   assignmentRules        AssignmentRule[]
   emailAccounts          EmailAccount[]
+  authSessions           AuthSession[]
 }
 
 model User {
@@ -154,7 +156,8 @@ model User {
   firstName String
   lastName  String
 
-  role UserRole @default(AGENT)
+  role     UserRole @default(AGENT)
+  isActive Boolean  @default(true)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
@@ -171,6 +174,29 @@ model User {
   teamMemberships        TeamMember[]
   attachments            Attachment[]           @relation("AttachmentUploader")
   auditLogs              AuditLog[]             @relation("AuditLogActor")
+  authSessions           AuthSession[]
+}
+
+model AuthSession {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  tokenHash String @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([companyId])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model Customer {
