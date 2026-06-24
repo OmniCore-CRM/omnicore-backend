@@ -116,6 +116,11 @@ enum EmailAccountStatus {
   DISABLED
 }
 
+enum ProviderAccountStatus {
+  ACTIVE
+  DISABLED
+}
+
 model Company {
   id       String  @id @default(cuid())
   name     String
@@ -145,6 +150,7 @@ model Company {
   slaPolicies            SlaPolicy[]
   assignmentRules        AssignmentRule[]
   emailAccounts          EmailAccount[]
+  whatsAppAccounts       WhatsAppAccount[]
   authSessions           AuthSession[]
 }
 
@@ -325,6 +331,24 @@ model WidgetInstallation {
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
+}
+
+model WhatsAppAccount {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  phoneNumberId      String
+  displayPhoneNumber String?
+  status             ProviderAccountStatus @default(ACTIVE)
+  metadata           Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([phoneNumberId])
+  @@index([companyId, status])
 }
 
 model EmailAccount {

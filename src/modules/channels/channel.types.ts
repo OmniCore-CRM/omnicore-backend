@@ -17,6 +17,7 @@ export enum ChannelWebhookEventType {
 export type IncomingChannelMessage = {
   provider: ChannelProvider;
   externalMessageId: string;
+  providerAccountId?: string;
   externalUserId: string;
   externalConversationId?: string;
   customerName?: string;
@@ -30,6 +31,7 @@ export type IncomingChannelMessage = {
 export type ChannelDeliveryEvent = {
   provider: ChannelProvider;
   externalMessageId: string;
+  providerAccountId?: string;
 
   status:
     | "PENDING"

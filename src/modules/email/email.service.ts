@@ -342,13 +342,24 @@ export class EmailService {
         },
       });
       return { customer, conversation, message };
-    }).catch((error) => {
+    }).catch(async (error) => {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        return null;
+        const duplicate = await prisma.message.findFirst({
+          where: {
+            companyId: account.companyId,
+            provider: ConversationChannel.EMAIL,
+            externalMessageId: email.externalMessageId,
+          },
+        });
+
+        return duplicate
+          ? { customer: null, conversation: null, message: duplicate }
+          : null;
       }
       throw error;
     });
     if (!result) return null;
+    if (!result.customer || !result.conversation) return mapMessage(result.message);
 
     const io = getIO();
     io.to(`conversation:${result.conversation.id}`).emit("new_message", mapMessage(result.message));

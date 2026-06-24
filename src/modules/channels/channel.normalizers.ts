@@ -12,6 +12,7 @@ export const normalizeWhatsAppMessage =
     return {
       provider: ChannelProvider.WHATSAPP,
       externalMessageId: payload.messageId,
+      providerAccountId: payload.providerAccountId,
       externalUserId: payload.from,
       customerPhone: payload.from,
       customerName: payload.customerName,
@@ -41,6 +42,7 @@ export const normalizeWhatsAppStatus =
     return {
       provider: ChannelProvider.WHATSAPP,
       externalMessageId: payload.id,
+      providerAccountId: payload.providerAccountId,
       status: mappedStatus,
       timestamp: payload.timestamp || new Date().toISOString(),
     };

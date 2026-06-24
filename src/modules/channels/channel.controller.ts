@@ -90,11 +90,15 @@ export class ChannelController {
       const entry = req.body?.entry?.[0];
       const change = entry?.changes?.[0];
       const value = change?.value;
+      const providerAccountId = value?.metadata?.phone_number_id;
       const incomingMessage = value?.messages?.[0];
       const statusReceipt = value?.statuses?.[0];
 
       if (statusReceipt) {
-        const normalizedStatus = normalizeWhatsAppStatus(statusReceipt);
+        const normalizedStatus = normalizeWhatsAppStatus({
+          ...statusReceipt,
+          providerAccountId,
+        });
 
         if (normalizedStatus) {
           await ChannelService.processDeliveryEvent(normalizedStatus);
@@ -119,6 +123,7 @@ export class ChannelController {
       // Normalize real WhatsApp webhook payload
       const normalizedMessage = normalizeWhatsAppMessage({
         messageId: incomingMessage.id,
+        providerAccountId,
         from: incomingMessage.from,
         customerName:
           value?.contacts?.[0]?.profile?.name ||

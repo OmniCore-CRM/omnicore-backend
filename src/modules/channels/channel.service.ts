@@ -8,7 +8,7 @@ import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { mapMessage } from "@/modules/messages/message.mapper.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { env } from "@/config/env.js";
-import { resolveDevelopmentIngestionCompanyId } from "@/core/utils/tenant-resolution.js";
+import { resolveWhatsAppIngestionCompanyId } from "@/core/utils/tenant-resolution.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { EmailService } from "@/modules/email/email.service.js";
 
@@ -88,7 +88,7 @@ const emitMessageStatusUpdated = (message: Awaited<ReturnType<typeof prisma.mess
 export class ChannelService {
   // ===== Process inbound provider message =====
   static async processIncomingMessage(payload: IncomingChannelMessage) {
-    const companyId = resolveDevelopmentIngestionCompanyId();
+    const companyId = await resolveWhatsAppIngestionCompanyId(payload.providerAccountId);
 
     const existingMessage = await prisma.message.findFirst({
       where: {
@@ -200,18 +200,29 @@ export class ChannelService {
         conversation,
         message,
       };
-    }).catch((error) => {
+    }).catch(async (error) => {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
-        return null;
+        const duplicate = await prisma.message.findFirst({
+          where: {
+            companyId,
+            provider: ConversationChannel.WHATSAPP,
+            externalMessageId: payload.externalMessageId,
+          },
+          include: { conversation: true },
+        });
+
+        return duplicate
+          ? { customer: null, conversation: duplicate.conversation, message: duplicate }
+          : null;
       }
 
       throw error;
     });
 
-    if (!result) {
+    if (!result || !result.customer) {
       return;
     }
 
@@ -243,7 +254,7 @@ export class ChannelService {
 
   // ===== Process delivery/read events =====
   static async processDeliveryEvent(payload: ChannelDeliveryEvent) {
-    const companyId = resolveDevelopmentIngestionCompanyId();
+    const companyId = await resolveWhatsAppIngestionCompanyId(payload.providerAccountId);
 
     // Find CRM message by provider message ID
     const message = await prisma.message.findFirst({
