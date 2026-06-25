@@ -1,10 +1,12 @@
 import type { AuditLog, User } from "@prisma/client";
 
+type SafeActor = Pick<User, "id" | "email" | "firstName" | "lastName" | "role">;
+
 type AuditLogWithActor = AuditLog & {
-  actor?: User | null;
+  actor?: SafeActor | null;
 };
 
-const mapActor = (actor?: User | null) => {
+const mapActor = (actor?: SafeActor | null) => {
   if (!actor) return null;
   return {
     id: actor.id,

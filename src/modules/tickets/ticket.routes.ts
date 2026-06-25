@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { protect } from "@/core/middleware/auth.middleware.js";
+import { authorize, RBAC } from "@/core/middleware/authorize.middleware.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { TicketController } from "./ticket.controller.js";
 import { TagController } from "@/modules/tags/tag.controller.js";
@@ -20,6 +21,7 @@ router.get("/", protect, TicketController.getTickets);
 router.post(
   "/",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(createTicketSchema),
   TicketController.createTicket
 );
@@ -31,6 +33,7 @@ router.get("/:id/notes", protect, TicketController.getTicketNotes);
 router.post(
   "/:id/notes",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(createTicketNoteSchema),
   TicketController.createTicketNote
 );
@@ -40,6 +43,7 @@ router.get("/:id/activity", protect, TicketController.getTicketActivity);
 router.patch(
   "/:id",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(updateTicketSchema),
   TicketController.updateTicket
 );
@@ -47,15 +51,17 @@ router.patch(
 router.post(
   "/:id/team",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(assignTeamSchema),
   TeamController.assignTicket
 );
 
-router.post("/:id/tags", protect, TagController.attachTicketTag);
+router.post("/:id/tags", protect, authorize(...RBAC.operational), TagController.attachTicketTag);
 
 router.post(
   "/:ticketId/attachments",
   protect,
+  authorize(...RBAC.operational),
   uploadSingleAttachment,
   AttachmentController.upload
 );
@@ -63,6 +69,7 @@ router.post(
 router.delete(
   "/:id/tags/:tagId",
   protect,
+  authorize(...RBAC.operational),
   TagController.removeTicketTag
 );
 

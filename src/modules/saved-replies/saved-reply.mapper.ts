@@ -1,10 +1,12 @@
 import type { SavedReply, User } from "@prisma/client";
 
+type SafeCreator = Pick<User, "id" | "email" | "firstName" | "lastName" | "role">;
+
 type SavedReplyWithCreator = SavedReply & {
-  createdBy?: User | null;
+  createdBy?: SafeCreator | null;
 };
 
-const mapUserSummary = (user?: User | null) => {
+const mapUserSummary = (user?: SafeCreator | null) => {
   if (!user) return null;
 
   return {

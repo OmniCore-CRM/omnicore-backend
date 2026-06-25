@@ -2,11 +2,11 @@ import crypto from "node:crypto";
 import {
   ConversationChannel,
   MessageSender,
+  Prisma,
   TicketActivityAction,
   TicketPriority,
   TicketStatus,
   UserRole,
-  type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { getIO } from "@/socket/socket.server.js";
@@ -36,6 +36,15 @@ import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
+
+
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
 
 type RequestOrigin = string | undefined;
 
@@ -324,7 +333,7 @@ export class WidgetService {
       include: {
         attachments: {
           include: {
-            uploadedBy: true,
+            uploadedBy: { select: safeUserSelect },
           },
           orderBy: {
             createdAt: "asc",
@@ -358,7 +367,7 @@ export class WidgetService {
         conversationId,
       },
       include: {
-        uploadedBy: true,
+        uploadedBy: { select: safeUserSelect },
       },
       orderBy: {
         createdAt: "asc",
@@ -540,8 +549,8 @@ export class WidgetService {
         },
       },
       include: {
-        assignee: true,
-        createdBy: true,
+        assignee: { select: safeUserSelect },
+        createdBy: { select: safeUserSelect },
         customer: true,
         conversation: true,
       },
@@ -645,8 +654,8 @@ export class WidgetService {
           : {}),
       },
       include: {
-        assignee: true,
-        createdBy: true,
+        assignee: { select: safeUserSelect },
+        createdBy: { select: safeUserSelect },
         customer: true,
         conversation: true,
       },

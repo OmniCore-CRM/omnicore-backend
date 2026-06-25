@@ -23,8 +23,14 @@ type TargetInput = {
   ticketId?: string;
 };
 
+const safeUploaderSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+} satisfies Prisma.UserSelect;
+
 const attachmentInclude = {
-  uploadedBy: true,
+  uploadedBy: { select: safeUploaderSelect },
 } satisfies Prisma.AttachmentInclude;
 
 const notFound = () =>

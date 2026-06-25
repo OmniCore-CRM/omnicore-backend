@@ -1,8 +1,10 @@
 import type { Attachment, Message, User } from "@prisma/client";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 
+type AttachmentUploader = Pick<User, "id" | "firstName" | "lastName">;
+
 type MessageWithAttachments = Message & {
-  attachments?: (Attachment & { uploadedBy?: User | null })[];
+  attachments?: (Attachment & { uploadedBy?: AttachmentUploader | null })[];
 };
 
 // Normalize single message response

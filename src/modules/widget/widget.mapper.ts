@@ -40,9 +40,11 @@ export const mapPublicWidgetCustomer = (customer: Customer) => ({
   updatedAt: customer.updatedAt,
 });
 
+type AttachmentUploader = Pick<User, "id" | "firstName" | "lastName">;
+
 export const mapPublicWidgetMessage = (
   message: Message & {
-    attachments?: (Attachment & { uploadedBy?: User | null })[];
+    attachments?: (Attachment & { uploadedBy?: AttachmentUploader | null })[];
   }
 ) => ({
   id: message.id,
@@ -59,7 +61,7 @@ export const mapPublicWidgetMessage = (
 
 export const mapPublicWidgetMessages = (
   messages: (Message & {
-    attachments?: (Attachment & { uploadedBy?: User | null })[];
+    attachments?: (Attachment & { uploadedBy?: AttachmentUploader | null })[];
   })[]
 ) =>
   messages.map(mapPublicWidgetMessage);

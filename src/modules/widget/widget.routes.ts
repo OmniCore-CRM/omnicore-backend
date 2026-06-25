@@ -9,6 +9,7 @@ import {
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
+import { authorize, RBAC } from "@/core/middleware/authorize.middleware.js";
 import { AttachmentController } from "@/modules/attachments/attachment.controller.js";
 import { uploadSingleAttachment } from "@/modules/attachments/attachment.upload.js";
 
@@ -23,12 +24,14 @@ const widgetRateLimit = rateLimit({
 router.get(
   "/installations",
   protect,
+  authorize(...RBAC.admin),
   WidgetController.getInstallations
 );
 
 router.post(
   "/installations",
   protect,
+  authorize(...RBAC.admin),
   validateRequest(createWidgetInstallationSchema),
   WidgetController.createInstallation
 );
@@ -43,6 +46,7 @@ router.post(
 router.patch(
   "/installations/:id",
   protect,
+  authorize(...RBAC.admin),
   validateRequest(updateWidgetInstallationSchema),
   WidgetController.updateInstallation
 );

@@ -249,7 +249,7 @@ export class ConversationService {
         team: true,
         attachments: {
           include: {
-            uploadedBy: true,
+            uploadedBy: { select: safeUserSelect },
           },
           orderBy: {
             createdAt: "asc",
@@ -278,7 +278,7 @@ export class ConversationService {
         customer: true,
         team: true,
         attachments: {
-          include: { uploadedBy: true },
+          include: { uploadedBy: { select: safeUserSelect } },
           orderBy: { createdAt: "asc" },
         },
         tags: {
@@ -625,7 +625,7 @@ export class ConversationService {
         team: true,
         attachments: {
           include: {
-            uploadedBy: true,
+            uploadedBy: { select: safeUserSelect },
           },
           orderBy: {
             createdAt: "asc",
@@ -641,7 +641,7 @@ export class ConversationService {
         },
         tickets: {
           include: {
-            assignee: true,
+            assignee: { select: safeUserSelect },
           },
           orderBy: [
             {
@@ -657,7 +657,7 @@ export class ConversationService {
           include: {
             attachments: {
               include: {
-                uploadedBy: true,
+                uploadedBy: { select: safeUserSelect },
               },
               orderBy: {
                 createdAt: "asc",
@@ -675,7 +675,7 @@ export class ConversationService {
         },
         activities: {
           include: {
-            actor: true,
+            actor: { select: safeUserSelect },
           },
           orderBy: {
             createdAt: "desc",
@@ -792,7 +792,7 @@ export class ConversationService {
         conversationId,
       },
       include: {
-        actor: true,
+        actor: { select: safeUserSelect },
       },
       orderBy: {
         createdAt: "desc",

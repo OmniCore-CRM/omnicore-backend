@@ -26,10 +26,18 @@ import type {
   UpdateTicketInput,
 } from "./ticket.validation.js";
 
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
 const ticketInclude = {
-  assignee: true,
+  assignee: { select: safeUserSelect },
   team: true,
-  createdBy: true,
+  createdBy: { select: safeUserSelect },
   customer: true,
   conversation: true,
   tags: {
@@ -43,7 +51,7 @@ const ticketInclude = {
 } satisfies Prisma.TicketInclude;
 
 const ticketListInclude = {
-  assignee: true,
+  assignee: { select: safeUserSelect },
   team: true,
   customer: true,
   conversation: true,
@@ -68,7 +76,7 @@ const ticketDetailInclude = {
   },
   notes: {
     include: {
-      author: true,
+      author: { select: safeUserSelect },
     },
     orderBy: {
       createdAt: "desc",
@@ -76,7 +84,7 @@ const ticketDetailInclude = {
   },
   activities: {
     include: {
-      actor: true,
+      actor: { select: safeUserSelect },
     },
     orderBy: {
       createdAt: "desc",
@@ -84,7 +92,7 @@ const ticketDetailInclude = {
   },
   attachments: {
     include: {
-      uploadedBy: true,
+      uploadedBy: { select: safeUserSelect },
     },
     orderBy: {
       createdAt: "desc",
@@ -801,7 +809,7 @@ export class TicketService {
         ticketId,
       },
       include: {
-        author: true,
+        author: { select: safeUserSelect },
       },
       orderBy: {
         createdAt: "desc",
@@ -828,7 +836,7 @@ export class TicketService {
           content: data.content,
         },
         include: {
-          author: true,
+          author: { select: safeUserSelect },
         },
       });
 
@@ -872,7 +880,7 @@ export class TicketService {
         ticketId,
       },
       include: {
-        actor: true,
+        actor: { select: safeUserSelect },
       },
       orderBy: {
         createdAt: "desc",

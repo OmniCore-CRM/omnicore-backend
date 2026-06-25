@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { protect } from "@/core/middleware/auth.middleware.js";
+import { authorize, RBAC } from "@/core/middleware/authorize.middleware.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { CustomerController } from "./customer.controller.js";
 import { createCustomerSchema } from "./customer.validation.js";
@@ -11,6 +12,7 @@ const router = Router();
 router.post(
   "/",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(createCustomerSchema),
   CustomerController.createCustomer
 );
@@ -29,11 +31,12 @@ router.get(
   CustomerController.getCustomerById
 );
 
-router.post("/:id/tags", protect, TagController.attachCustomerTag);
+router.post("/:id/tags", protect, authorize(...RBAC.operational), TagController.attachCustomerTag);
 
 router.delete(
   "/:id/tags/:tagId",
   protect,
+  authorize(...RBAC.operational),
   TagController.removeCustomerTag
 );
 

@@ -20,6 +20,14 @@ import type {
   UpdateAssignmentRuleInput,
 } from "./assignment-rule.validation.js";
 
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
 type UserContext = { userId: string; companyId: string; role: string };
 type AutomaticAssignmentInput = {
   companyId: string;
@@ -421,8 +429,8 @@ export class AssignmentRuleService {
     const ticket = await prisma.ticket.findFirst({
       where: { id: ticketId, companyId },
       include: {
-        assignee: true,
-        createdBy: true,
+        assignee: { select: safeUserSelect },
+        createdBy: { select: safeUserSelect },
         customer: true,
         conversation: true,
         team: true,

@@ -46,7 +46,15 @@ export class AuditLogService {
     const logs = await prisma.auditLog.findMany({
       where,
       include: {
-        actor: true,
+        actor: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+          },
+        },
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: query.limit + 1,

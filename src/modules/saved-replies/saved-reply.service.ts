@@ -13,8 +13,16 @@ import type {
   UpdateSavedReplyInput,
 } from "./saved-reply.validation.js";
 
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
 const savedReplyInclude = {
-  createdBy: true,
+  createdBy: { select: safeUserSelect },
 } satisfies Prisma.SavedReplyInclude;
 
 type UserContext = {

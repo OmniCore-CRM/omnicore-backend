@@ -101,7 +101,17 @@ export class AnalyticsService {
       }),
       prisma.auditLog.findMany({
         where: auditWhere,
-        include: { actor: true },
+        include: {
+          actor: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              role: true,
+            },
+          },
+        },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 8,
       }),

@@ -13,13 +13,15 @@ import {
   type User,
 } from "@prisma/client";
 
+type SafeUser = Pick<User, "id" | "email" | "firstName" | "lastName" | "role">;
+
 type ConversationWithMessages = Conversation & {
   messages?: Message[];
   tags?: TagLink[];
 };
 
 type TicketWithRelations = Ticket & {
-  assignee?: User | null;
+  assignee?: SafeUser | null;
   activities?: TicketActivityWithActor[];
   notes?: TicketNoteWithAuthor[];
   tags?: TagLink[];
@@ -30,11 +32,11 @@ type TagLink = {
 };
 
 type TicketActivityWithActor = TicketActivity & {
-  actor: User | null;
+  actor: SafeUser | null;
 };
 
 type TicketNoteWithAuthor = TicketNote & {
-  author: User;
+  author: SafeUser;
 };
 
 type CustomerDetail = Customer & {
@@ -67,7 +69,7 @@ const finalStatuses = new Set<TicketStatus>([
   TicketStatus.CLOSED,
 ]);
 
-const mapUserSummary = (user?: User | null) => {
+const mapUserSummary = (user?: SafeUser | null) => {
   if (!user) return null;
 
   return {

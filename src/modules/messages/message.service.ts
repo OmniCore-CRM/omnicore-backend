@@ -1,4 +1,4 @@
-import { MessageStatus } from "@prisma/client";
+import { MessageStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -9,6 +9,14 @@ import { mapMessage, mapMessages } from "./message.mapper.js";
 import type { PaginationParams } from "@/core/utils/pagination.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
+
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
 
 export class MessageService {
   // ===== Create tenant-scoped message =====
@@ -161,7 +169,7 @@ export class MessageService {
       include: {
         attachments: {
           include: {
-            uploadedBy: true,
+            uploadedBy: { select: safeUserSelect },
           },
           orderBy: {
             createdAt: "asc",

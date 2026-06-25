@@ -13,6 +13,14 @@ import {
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import type { Prisma } from "@prisma/client";
 
+const safeUserSelect = {
+  id: true,
+  email: true,
+  firstName: true,
+  lastName: true,
+  role: true,
+} satisfies Prisma.UserSelect;
+
 export class CustomerService {
   // ===== Create customer under authenticated tenant =====
   static async createCustomer(
@@ -196,7 +204,7 @@ export class CustomerService {
         },
         tickets: {
           include: {
-            assignee: true,
+            assignee: { select: safeUserSelect },
             tags: {
               include: {
                 tag: true,
@@ -207,7 +215,7 @@ export class CustomerService {
             },
             activities: {
               include: {
-                actor: true,
+                actor: { select: safeUserSelect },
               },
               orderBy: {
                 createdAt: "desc",
@@ -215,7 +223,7 @@ export class CustomerService {
             },
             notes: {
               include: {
-                author: true,
+                author: { select: safeUserSelect },
               },
               orderBy: {
                 createdAt: "desc",

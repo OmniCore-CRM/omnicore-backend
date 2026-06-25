@@ -23,8 +23,10 @@ type TeamSummary = {
   name: string;
 };
 
+type SafeActor = Pick<User, "id" | "firstName" | "lastName">;
+
 type RecentAuditLog = AuditLog & {
-  actor: User | null;
+  actor: SafeActor | null;
 };
 
 type AnalyticsOverviewInput = {

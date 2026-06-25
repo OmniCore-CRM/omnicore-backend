@@ -7,6 +7,16 @@ export class UserService {
       where: {
         companyId,
       },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        companyId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: [
         {
           firstName: "asc",

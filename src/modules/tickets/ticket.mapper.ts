@@ -18,27 +18,29 @@ type ConversationWithMessages = Conversation & {
   messages?: Message[];
 };
 
+type SafeUser = Pick<User, "id" | "email" | "firstName" | "lastName" | "role">;
+
 type TicketWithRelations = Ticket & {
-  assignee?: User | null;
-  createdBy?: User | null;
+  assignee?: SafeUser | null;
+  createdBy?: SafeUser | null;
   customer?: Customer | null;
   conversation?: ConversationWithMessages | null;
   notes?: TicketNoteWithAuthor[];
   activities?: TicketActivityWithActor[];
   tags?: (TicketTag & { tag: Tag })[];
   team?: Team | null;
-  attachments?: (Attachment & { uploadedBy?: User | null })[];
+  attachments?: (Attachment & { uploadedBy?: SafeUser | null })[];
 };
 
 type TicketNoteWithAuthor = TicketNote & {
-  author: User;
+  author: SafeUser;
 };
 
 type TicketActivityWithActor = TicketActivity & {
-  actor: User | null;
+  actor: SafeUser | null;
 };
 
-const mapUserSummary = (user?: User | null) => {
+const mapUserSummary = (user?: SafeUser | null) => {
   if (!user) return null;
 
   return {

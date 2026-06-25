@@ -1,7 +1,19 @@
 import type { User } from "@prisma/client";
 
+type SafeUser = Pick<
+  User,
+  | "id"
+  | "email"
+  | "firstName"
+  | "lastName"
+  | "role"
+  | "companyId"
+  | "createdAt"
+  | "updatedAt"
+>;
+
 // ===== Normalize single user response =====
-export const mapUser = (user: User) => {
+export const mapUser = (user: SafeUser) => {
   return {
     id: user.id,
 
@@ -20,6 +32,6 @@ export const mapUser = (user: User) => {
 };
 
 // ===== Normalize multiple users response =====
-export const mapUsers = (users: User[]) => {
+export const mapUsers = (users: SafeUser[]) => {
   return users.map(mapUser);
 };

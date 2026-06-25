@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { protect } from "@/core/middleware/auth.middleware.js";
+import { authorize, RBAC } from "@/core/middleware/authorize.middleware.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { ConversationController } from "./conversation.controller.js";
 import {
@@ -20,6 +21,7 @@ const router = Router();
 router.post(
   "/",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(createConversationSchema),
   ConversationController.createConversation
 );
@@ -41,6 +43,7 @@ router.get(
 router.patch(
   "/:id",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(updateConversationSchema),
   ConversationController.updateConversation
 );
@@ -48,6 +51,7 @@ router.patch(
 router.post(
   "/:id/team",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(assignTeamSchema),
   TeamController.assignConversation
 );
@@ -62,6 +66,7 @@ router.get(
 router.post(
   "/:id/read",
   protect,
+  authorize(...RBAC.operational),
   ConversationController.markConversationAsRead
 );
 
@@ -76,6 +81,7 @@ router.get(
 router.post(
   "/:id/messages",
   protect,
+  authorize(...RBAC.operational),
   (req, _res, next) => {
     // Populate parameters expected by validation/service layers
     req.body.conversationId = req.params.id;
@@ -89,15 +95,17 @@ router.post(
 router.post(
   "/:id/tickets",
   protect,
+  authorize(...RBAC.operational),
   validateRequest(createConversationTicketSchema),
   TicketController.createTicketFromConversation
 );
 
-router.post("/:id/tags", protect, TagController.attachConversationTag);
+router.post("/:id/tags", protect, authorize(...RBAC.operational), TagController.attachConversationTag);
 
 router.delete(
   "/:id/tags/:tagId",
   protect,
+  authorize(...RBAC.operational),
   TagController.removeConversationTag
 );
 
