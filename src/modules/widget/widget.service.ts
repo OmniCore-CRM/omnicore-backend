@@ -49,6 +49,8 @@ const safeUserSelect = {
 type RequestOrigin = string | undefined;
 
 const WIDGET_ACCESS_ERROR = "Widget is not available";
+const WIDGET_MESSAGE_WINDOW_MS = 30 * 1000;
+const WIDGET_MESSAGE_WINDOW_MAX = 5;
 
 const normalizeDomain = (domain: string) => {
   const trimmed = domain.trim().toLowerCase();
@@ -393,6 +395,12 @@ export class WidgetService {
       requestOrigin
     );
 
+    await this.assertWidgetMessageVelocity(
+      session.companyId,
+      conversationId,
+      session.customerId
+    );
+
     const result = await prisma.$transaction(async (tx) => {
       const createdMessage = await tx.message.create({
         data: {
@@ -445,6 +453,33 @@ export class WidgetService {
     }
 
     return messageDto;
+  }
+
+  private static async assertWidgetMessageVelocity(
+    companyId: string,
+    conversationId: string | null,
+    customerId: string | null
+  ) {
+    const recentCustomerMessages = await prisma.message.count({
+      where: {
+        companyId,
+        sender: MessageSender.CUSTOMER,
+        createdAt: {
+          gte: new Date(Date.now() - WIDGET_MESSAGE_WINDOW_MS),
+        },
+        ...(conversationId ? { conversationId } : {}),
+        ...(customerId
+          ? { conversation: { customerId } }
+          : {}),
+      },
+    });
+
+    if (recentCustomerMessages >= WIDGET_MESSAGE_WINDOW_MAX) {
+      throw new AppError(
+        "Too many messages. Please wait before sending again.",
+        HTTP_STATUS.TOO_MANY_REQUESTS
+      );
+    }
   }
 
   private static async resolveEnabledInstallation(

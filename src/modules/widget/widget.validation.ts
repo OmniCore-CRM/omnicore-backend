@@ -55,7 +55,7 @@ export const createWidgetConversationSchema = z.object({
     .string()
     .trim()
     .min(1, "Initial message is required")
-    .max(5000, "Message is too long"),
+    .max(2000, "Message is too long"),
 });
 
 // ===== Send widget message =====
@@ -68,7 +68,7 @@ export const createWidgetMessageSchema = z.object({
     .string()
     .trim()
     .min(1, "Message content is required")
-    .max(5000, "Message is too long"),
+    .max(2000, "Message is too long"),
 });
 
 export const widgetBootstrapQuerySchema = z.object({

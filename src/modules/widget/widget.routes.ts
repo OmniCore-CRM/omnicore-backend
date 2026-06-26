@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { WidgetController } from "./widget.controller.js";
 import {
@@ -15,10 +15,70 @@ import { uploadSingleAttachment } from "@/modules/attachments/attachment.upload.
 
 const router = Router();
 
-const widgetRateLimit = rateLimit({
+const getClientIp = (req: Request) =>
+  req.ip || req.socket.remoteAddress || "unknown";
+
+const publicWidgetKey = (req: Request) =>
+  String(req.body?.publicKey || req.query?.key || "unknown-key");
+
+const widgetSessionKey = (req: Request) =>
+  String(req.body?.sessionToken || req.query?.sessionToken || "unknown-session");
+
+const widgetConversationKey = (req: Request) =>
+  String(req.params.id || req.params.conversationId || "unknown-conversation");
+
+const widgetBootstrapRateLimit = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
-  keyPrefix: "widget",
+  max: 90,
+  keyPrefix: "widget:bootstrap",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `key:${publicWidgetKey(req)}`,
+  ],
+});
+
+const widgetConversationRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 12,
+  keyPrefix: "widget:conversation",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `key:${publicWidgetKey(req)}`,
+  ],
+});
+
+const widgetReadRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyPrefix: "widget:read",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `key:${publicWidgetKey(req)}`,
+    `session:${widgetSessionKey(req)}`,
+    `conversation:${widgetConversationKey(req)}`,
+  ],
+});
+
+const widgetMessageRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  keyPrefix: "widget:message",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `key:${publicWidgetKey(req)}`,
+    `session:${widgetSessionKey(req)}`,
+    `conversation:${widgetConversationKey(req)}`,
+  ],
+});
+
+const widgetAttachmentRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  keyPrefix: "widget:attachment",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `conversation:${widgetConversationKey(req)}`,
+  ],
 });
 
 router.get(
@@ -38,7 +98,7 @@ router.post(
 
 router.post(
   "/conversations/:conversationId/attachments",
-  widgetRateLimit,
+  widgetAttachmentRateLimit,
   uploadSingleAttachment,
   AttachmentController.uploadWidget
 );
@@ -53,14 +113,14 @@ router.patch(
 
 router.get(
   "/bootstrap",
-  widgetRateLimit,
+  widgetBootstrapRateLimit,
   WidgetController.bootstrap
 );
 
 // Create public widget conversation
 router.post(
   "/conversations",
-  widgetRateLimit,
+  widgetConversationRateLimit,
   validateRequest(
     createWidgetConversationSchema
   ),
@@ -69,14 +129,14 @@ router.post(
 
 router.get(
   "/conversations/:id/messages",
-  widgetRateLimit,
+  widgetReadRateLimit,
   WidgetController.getWidgetMessages
 );
 
 // Send public widget message
 router.post(
   "/conversations/:id/messages",
-  widgetRateLimit,
+  widgetMessageRateLimit,
   validateRequest(createWidgetMessageSchema),
   WidgetController.createWidgetMessage
 );

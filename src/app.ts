@@ -9,12 +9,15 @@ import { env } from "@/config/env.js";
 import { prisma } from "@/config/db.js";
 import { requestIdMiddleware } from "@/core/middleware/request-id.middleware.js";
 import { accessLogMiddleware } from "@/core/middleware/access-log.middleware.js";
+import { AppError } from "@/core/errors/app-error.js";
+import { HTTP_STATUS } from "@/core/constants/http-status.js";
 
 const app = express();
 
 // Express generates ETags after route handlers finish, which made dynamic API
 // 304 responses wait on full database work. Frontend caching handles freshness.
 app.set("etag", false);
+app.set("trust proxy", 1);
 
 // Security middleware
 app.use(
@@ -24,7 +27,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(new Error("Not allowed by CORS"));
+        callback(new AppError("Not allowed by CORS", HTTP_STATUS.FORBIDDEN));
       }
     },
     credentials: true,

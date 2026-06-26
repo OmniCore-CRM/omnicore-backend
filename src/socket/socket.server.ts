@@ -105,6 +105,20 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
           return next(new Error("Widget is not available"));
         }
 
+        const conversation = await prisma.conversation.findFirst({
+          where: {
+            id: decoded.conversationId,
+            companyId: decoded.companyId,
+            customerId: decoded.customerId,
+            channel: ConversationChannel.WEBSITE,
+          },
+          select: { id: true },
+        });
+
+        if (!conversation) {
+          return next(new Error("Widget is not available"));
+        }
+
         socket.data.authType = "widget";
         socket.data.companyId = decoded.companyId;
         socket.data.widgetInstallationId =
@@ -165,8 +179,33 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
       void socket.join(`company:${companyId}`);
     }
 
-    const isAuthorizedConversation = async (conversationId: string) => {
-      if (!conversationId) {
+    const socketEventBuckets = new Map<
+      string,
+      { count: number; resetAt: number }
+    >();
+
+    const allowSocketEvent = (key: string, max: number, windowMs: number) => {
+      const now = Date.now();
+      const current = socketEventBuckets.get(key);
+
+      if (!current || current.resetAt <= now) {
+        socketEventBuckets.set(key, { count: 1, resetAt: now + windowMs });
+        return true;
+      }
+
+      current.count += 1;
+      return current.count <= max;
+    };
+
+    const isSafeConversationId = (
+      conversationId: unknown
+    ): conversationId is string =>
+      typeof conversationId === "string" &&
+      conversationId.trim().length > 0 &&
+      conversationId.length <= 128;
+
+    const isAuthorizedConversation = async (conversationId: unknown) => {
+      if (!isSafeConversationId(conversationId)) {
         return false;
       }
 
@@ -204,7 +243,10 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
 
     socket.on("join_conversation", (conversationId: string) => {
       void (async () => {
-        if (!(await isAuthorizedConversation(conversationId))) {
+        if (
+          !allowSocketEvent("join_conversation", 30, 60 * 1000) ||
+          !(await isAuthorizedConversation(conversationId))
+        ) {
           emitRoomAuthorizationError();
           return;
         }
@@ -214,7 +256,7 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
     });
 
     socket.on("leave_conversation", (conversationId: string) => {
-      if (conversationId) {
+      if (isSafeConversationId(conversationId)) {
         void socket.leave(`conversation:${conversationId}`);
       }
     });
@@ -224,7 +266,10 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
       void (async () => {
         const conversationId = payload?.conversationId;
 
-        if (!(await isAuthorizedConversation(conversationId))) {
+        if (
+          !allowSocketEvent("typing:start", 60, 60 * 1000) ||
+          !(await isAuthorizedConversation(conversationId))
+        ) {
           return;
         }
 
@@ -238,7 +283,10 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
       void (async () => {
         const conversationId = payload?.conversationId;
 
-        if (!(await isAuthorizedConversation(conversationId))) {
+        if (
+          !allowSocketEvent("typing:stop", 60, 60 * 1000) ||
+          !(await isAuthorizedConversation(conversationId))
+        ) {
           return;
         }
 
