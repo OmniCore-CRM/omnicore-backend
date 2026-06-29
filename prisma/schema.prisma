@@ -261,6 +261,10 @@ model Conversation {
   @@index([customerId])
   @@index([status])
   @@index([teamId])
+  @@index([companyId, updatedAt, id])
+  @@index([companyId, status, updatedAt, id])
+  @@index([companyId, teamId, updatedAt, id])
+  @@index([companyId, channel, updatedAt, id])
 }
 
 model ConversationActivity {
@@ -315,6 +319,7 @@ model Message {
   @@index([companyId])
   @@index([conversationId])
   @@index([companyId, provider, externalMessageId])
+  @@index([companyId, conversationId, createdAt, id])
 }
 
 model WidgetInstallation {
@@ -419,6 +424,11 @@ model Ticket {
   @@index([status])
   @@index([priority])
   @@index([companyId, slaStatus])
+  @@index([companyId, updatedAt, id])
+  @@index([companyId, status, updatedAt, id])
+  @@index([companyId, assigneeId, updatedAt, id])
+  @@index([companyId, teamId, updatedAt, id])
+  @@index([companyId, priority, updatedAt, id])
   @@index([firstResponseDueAt])
   @@index([resolutionDueAt])
 }

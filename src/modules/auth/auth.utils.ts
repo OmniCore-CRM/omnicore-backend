@@ -32,10 +32,15 @@ export const createRefreshExpiry = () => {
   return expiresAt;
 };
 
+const isSecureEnv =
+  env.NODE_ENV === "production" || env.NODE_ENV === "staging";
+
 const refreshCookieOptions = (expires: Date) => ({
   httpOnly: true,
-  secure: env.NODE_ENV === "production" || env.NODE_ENV === "staging",
-  sameSite: env.NODE_ENV === "production" ? ("none" as const) : ("lax" as const),
+  secure: isSecureEnv,
+  // Frontend and backend are deployed on different origins in production-like
+  // environments, so refresh cookies must be cross-site compatible.
+  sameSite: isSecureEnv ? ("none" as const) : ("lax" as const),
   expires,
   path: "/api/v1/auth",
 });
@@ -47,8 +52,8 @@ export const setRefreshCookie = (res: Response, token: string, expires: Date) =>
 export const clearRefreshCookie = (res: Response) => {
   res.clearCookie(REFRESH_COOKIE_NAME, {
     httpOnly: true,
-    secure: env.NODE_ENV === "production" || env.NODE_ENV === "staging",
-    sameSite: env.NODE_ENV === "production" ? ("none" as const) : ("lax" as const),
+    secure: isSecureEnv,
+    sameSite: isSecureEnv ? ("none" as const) : ("lax" as const),
     path: "/api/v1/auth",
   });
 };
