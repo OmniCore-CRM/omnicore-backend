@@ -248,6 +248,9 @@ export class ConversationService {
         customer: true,
         team: true,
         attachments: {
+          where: {
+            messageId: null,
+          },
           include: {
             uploadedBy: { select: safeUserSelect },
           },
@@ -654,32 +657,15 @@ export class ConversationService {
         },
 
         messages: {
-          include: {
-            attachments: {
-              include: {
-                uploadedBy: { select: safeUserSelect },
-              },
-              orderBy: {
-                createdAt: "asc",
-              },
-            },
-          },
           orderBy: [
             {
-              createdAt: "asc",
+              createdAt: "desc",
             },
             {
-              id: "asc",
+              id: "desc",
             },
           ],
-        },
-        activities: {
-          include: {
-            actor: { select: safeUserSelect },
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
+          take: 1,
         },
       },
     });

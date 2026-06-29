@@ -181,6 +181,8 @@ model User {
   attachments            Attachment[]           @relation("AttachmentUploader")
   auditLogs              AuditLog[]             @relation("AuditLogActor")
   authSessions           AuthSession[]
+
+  @@index([companyId, firstName, lastName])
 }
 
 model AuthSession {

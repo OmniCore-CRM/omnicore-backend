@@ -4,12 +4,16 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient;
 };
 
+const isDevelopmentLike =
+  process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+
 export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
-    log: ["query", "error", "warn"],
+    // Query logging is useful locally but too expensive/noisy in production.
+    log: isDevelopmentLike ? ["query", "error", "warn"] : ["error"],
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = prisma;
-  }
+if (isDevelopmentLike) {
+  globalForPrisma.prisma = prisma;
+}
