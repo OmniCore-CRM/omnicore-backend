@@ -9,6 +9,10 @@ export interface AttachmentStorageProvider {
   remove(storageKey: string): Promise<void>;
 }
 
+// Local storage is kept as the development/staging provider. Downloads stay
+// server-mediated so authorization is checked before bytes leave storage; future
+// cloud providers should keep storage keys private and issue short-lived signed
+// reads only after the same tenant/session checks pass.
 class LocalAttachmentStorage implements AttachmentStorageProvider {
   private readonly root = path.resolve(env.ATTACHMENT_STORAGE_DIR);
 
