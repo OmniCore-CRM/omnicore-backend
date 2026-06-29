@@ -36,6 +36,7 @@ import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 
 
 const safeUserSelect = {
@@ -116,7 +117,8 @@ export class WidgetService {
 
   static async createInstallation(
     companyId: string,
-    data: CreateWidgetInstallationInput
+    data: CreateWidgetInstallationInput,
+    actorId?: string
   ) {
     const installation = await prisma.widgetInstallation.create({
       data: {
@@ -126,13 +128,26 @@ export class WidgetService {
       },
     });
 
+    await AuditLogService.record({
+      companyId,
+      actorId: actorId ?? null,
+      action: "WIDGET_INSTALLATION_CREATED",
+      entityType: "WIDGET_INSTALLATION",
+      entityId: installation.id,
+      metadata: {
+        enabled: installation.enabled,
+        allowedDomainsCount: installation.allowedDomains.length,
+      },
+    });
+
     return mapWidgetInstallation(installation);
   }
 
   static async updateInstallation(
     companyId: string,
     installationId: string,
-    data: UpdateWidgetInstallationInput
+    data: UpdateWidgetInstallationInput,
+    actorId?: string
   ) {
     const installation = await prisma.widgetInstallation.findFirst({
       where: {
@@ -163,6 +178,18 @@ export class WidgetService {
               ),
             }
           : {}),
+      },
+    });
+
+    await AuditLogService.record({
+      companyId,
+      actorId: actorId ?? null,
+      action: "WIDGET_INSTALLATION_UPDATED",
+      entityType: "WIDGET_INSTALLATION",
+      entityId: updated.id,
+      metadata: {
+        enabled: updated.enabled,
+        allowedDomainsCount: updated.allowedDomains.length,
       },
     });
 
@@ -299,6 +326,20 @@ export class WidgetService {
         priority: result.ticket.ticket.priority,
       });
     }
+
+    await AuditLogService.record({
+      companyId: installation.companyId,
+      action: "WIDGET_CONVERSATION_CREATED",
+      entityType: "CONVERSATION",
+      entityId: result.conversation.id,
+      metadata: {
+        channel: result.conversation.channel,
+        customerId: result.customer.id,
+        initialMessageId: result.message.id,
+        ticketId: result.ticket.ticket.id,
+        ticketCreated: result.ticket.created,
+      },
+    });
 
     return {
       sessionToken: signWidgetSession({
@@ -451,6 +492,18 @@ export class WidgetService {
         mapTicket(result.ticket.ticket)
       );
     }
+
+    await AuditLogService.record({
+      companyId: session.companyId,
+      action: "WIDGET_MESSAGE_RECEIVED",
+      entityType: "MESSAGE",
+      entityId: result.message.id,
+      metadata: {
+        conversationId,
+        ticketId: result.ticket.ticket.id,
+        ticketCreated: result.ticket.created,
+      },
+    });
 
     return messageDto;
   }

@@ -47,7 +47,8 @@ export class WidgetController {
 
       const installation = await WidgetService.createInstallation(
         req.user!.companyId,
-        req.body
+        req.body,
+        req.user!.userId
       );
 
       return sendResponse({
@@ -66,7 +67,8 @@ export class WidgetController {
       const installation = await WidgetService.updateInstallation(
         req.user!.companyId,
         req.params.id as string,
-        req.body
+        req.body,
+        req.user!.userId
       );
 
       return sendResponse({

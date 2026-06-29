@@ -177,6 +177,17 @@ export class AuthService {
       sessionId: updated.id,
     });
 
+    await AuditLogService.record({
+      companyId: session.user.companyId,
+      actorId: session.user.id,
+      action: "USER_SESSION_REFRESHED",
+      entityType: "AUTH_SESSION",
+      entityId: updated.id,
+      metadata: {
+        userId: session.user.id,
+      },
+    });
+
     return {
       auth: mapAuthResponse({
         accessToken,
@@ -192,17 +203,67 @@ export class AuthService {
     const now = new Date();
 
     if (input.refreshToken) {
-      await prisma.authSession.updateMany({
-        where: { tokenHash: hashRefreshToken(input.refreshToken), revokedAt: null },
+      const session = await prisma.authSession.findUnique({
+        where: { tokenHash: hashRefreshToken(input.refreshToken) },
+        select: {
+          id: true,
+          userId: true,
+          companyId: true,
+          revokedAt: true,
+        },
+      });
+
+      if (!session || session.revokedAt) {
+        return;
+      }
+
+      await prisma.authSession.update({
+        where: { id: session.id },
         data: { revokedAt: now },
+      });
+
+      await AuditLogService.record({
+        companyId: session.companyId,
+        actorId: session.userId,
+        action: "USER_LOGOUT",
+        entityType: "AUTH_SESSION",
+        entityId: session.id,
+        metadata: {
+          method: "refresh_cookie",
+        },
       });
       return;
     }
 
     if (input.sessionId) {
-      await prisma.authSession.updateMany({
-        where: { id: input.sessionId, revokedAt: null },
+      const session = await prisma.authSession.findUnique({
+        where: { id: input.sessionId },
+        select: {
+          id: true,
+          userId: true,
+          companyId: true,
+          revokedAt: true,
+        },
+      });
+
+      if (!session || session.revokedAt) {
+        return;
+      }
+
+      await prisma.authSession.update({
+        where: { id: session.id },
         data: { revokedAt: now },
+      });
+
+      await AuditLogService.record({
+        companyId: session.companyId,
+        actorId: session.userId,
+        action: "USER_LOGOUT",
+        entityType: "AUTH_SESSION",
+        entityId: session.id,
+        metadata: {
+          method: "access_session",
+        },
       });
     }
   }

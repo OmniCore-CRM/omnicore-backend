@@ -11,6 +11,7 @@ import { env } from "@/config/env.js";
 import { resolveWhatsAppIngestionCompanyId } from "@/core/utils/tenant-resolution.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { EmailService } from "@/modules/email/email.service.js";
+import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
@@ -99,6 +100,16 @@ export class ChannelService {
     });
 
     if (existingMessage) {
+      await AuditLogService.record({
+        companyId,
+        action: "WHATSAPP_WEBHOOK_DUPLICATE_IGNORED",
+        entityType: "MESSAGE",
+        entityId: existingMessage.id,
+        metadata: {
+          externalMessageId: payload.externalMessageId,
+          providerAccountId: payload.providerAccountId,
+        },
+      });
       return;
     }
 
@@ -226,6 +237,19 @@ export class ChannelService {
       return;
     }
 
+    await AuditLogService.record({
+      companyId,
+      action: "WHATSAPP_WEBHOOK_MESSAGE_RECEIVED",
+      entityType: "MESSAGE",
+      entityId: result.message.id,
+      metadata: {
+        conversationId: result.conversation.id,
+        externalMessageId: payload.externalMessageId,
+        providerAccountId: payload.providerAccountId,
+        isNewConversation,
+      },
+    });
+
     // Emit realtime inbox update
     const io = getIO();
 
@@ -267,6 +291,17 @@ export class ChannelService {
 
     // Message may not exist yet
     if (!message) {
+      await AuditLogService.record({
+        companyId,
+        action: "WHATSAPP_DELIVERY_UNMATCHED",
+        entityType: "MESSAGE",
+        entityId: payload.externalMessageId,
+        metadata: {
+          externalMessageId: payload.externalMessageId,
+          providerAccountId: payload.providerAccountId,
+          status: payload.status,
+        },
+      });
       return;
     }
 
@@ -285,6 +320,20 @@ export class ChannelService {
 
       data: {
         status: payload.status,
+      },
+    });
+
+    await AuditLogService.record({
+      companyId,
+      action: "WHATSAPP_DELIVERY_STATUS_UPDATED",
+      entityType: "MESSAGE",
+      entityId: updatedMessage.id,
+      metadata: {
+        conversationId: updatedMessage.conversationId,
+        externalMessageId: payload.externalMessageId,
+        providerAccountId: payload.providerAccountId,
+        from: message.status,
+        to: payload.status,
       },
     });
 
@@ -440,6 +489,20 @@ export class ChannelService {
           failure
         );
 
+        await AuditLogService.record({
+          companyId,
+          action: "WHATSAPP_MESSAGE_SEND_FAILED",
+          entityType: "MESSAGE",
+          entityId: failedMessage.id,
+          metadata: {
+            conversationId,
+            reason: failure.reason,
+            providerStatus: failure.providerStatus,
+            providerCode: failure.providerCode,
+            providerType: failure.providerType,
+          },
+        });
+
         throw new AppError(
           WHATSAPP_SEND_FAILED_MESSAGE,
           HTTP_STATUS.BAD_GATEWAY,
@@ -461,6 +524,17 @@ export class ChannelService {
         status: MessageStatus.SENT,
         externalMessageId,
         provider: ConversationChannel.WHATSAPP,
+      },
+    });
+
+    await AuditLogService.record({
+      companyId,
+      action: "WHATSAPP_MESSAGE_SENT",
+      entityType: "MESSAGE",
+      entityId: message.id,
+      metadata: {
+        conversationId,
+        providerMessageId: externalMessageId,
       },
     });
 

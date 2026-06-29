@@ -13,7 +13,86 @@ type AuditLogInput = {
   metadata?: Prisma.InputJsonValue | null;
 };
 
+const SENSITIVE_METADATA_KEY_PATTERN =
+  /(password|passcode|token|secret|authorization|cookie|header|raw(body|payload)?|payload|signature|api[_-]?key|refresh|access[_-]?key|session)/i;
+
+const MAX_METADATA_DEPTH = 6;
+
+const sanitizeAuditMetadataValue = (
+  value: unknown,
+  keyPath: string[] = [],
+  depth = 0
+): Prisma.InputJsonValue => {
+  if (depth > MAX_METADATA_DEPTH) {
+    return "[TRUNCATED]";
+  }
+
+  const currentKey = keyPath[keyPath.length - 1] ?? "";
+  if (SENSITIVE_METADATA_KEY_PATTERN.test(currentKey)) {
+    return "[REDACTED]";
+  }
+
+  if (value === null) return "[NULL]";
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      sanitizeAuditMetadataValue(item, keyPath, depth + 1)
+    );
+  }
+
+  if (typeof value === "object") {
+    const sanitizedObject: Record<string, Prisma.InputJsonValue> = {};
+
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (SENSITIVE_METADATA_KEY_PATTERN.test(key)) {
+        sanitizedObject[key] = "[REDACTED]";
+        continue;
+      }
+
+      sanitizedObject[key] = sanitizeAuditMetadataValue(
+        nested,
+        [...keyPath, key],
+        depth + 1
+      );
+    }
+
+    return sanitizedObject as Prisma.InputJsonObject;
+  }
+
+  return String(value);
+};
+
+const sanitizeAuditMetadata = (
+  metadata: Prisma.InputJsonValue | null | undefined
+): Prisma.InputJsonValue | undefined => {
+  if (metadata === null || metadata === undefined) {
+    return undefined;
+  }
+
+  return sanitizeAuditMetadataValue(metadata);
+};
+
 export class AuditLogService {
+  /**
+   * Phase 7 baseline notes:
+   * - Retention: keep audit rows append-only and enforce a scheduled DB retention job
+   *   (for example: prune rows older than policy window per tenant/compliance contract).
+   * - Tamper-evidence: use an append-only hash-chain digest (prev_hash + canonical_row)
+   *   and periodically anchor digests externally. This service currently prepares safe,
+   *   redacted metadata and avoids storing secret-bearing payloads.
+   */
   static async record(input: AuditLogInput) {
     await prisma.auditLog.create({
       data: {
@@ -22,7 +101,7 @@ export class AuditLogService {
         action: input.action,
         entityType: input.entityType,
         entityId: input.entityId,
-        metadata: input.metadata ?? undefined,
+        metadata: sanitizeAuditMetadata(input.metadata),
       },
     });
   }

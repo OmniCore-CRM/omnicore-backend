@@ -134,6 +134,24 @@ export class AttachmentService {
     );
 
     if (attachment.companyId !== session.companyId) throw notFound();
+
+    await AuditLogService.record({
+      companyId: session.companyId,
+      action: "ATTACHMENT_DOWNLOADED",
+      entityType: "ATTACHMENT",
+      entityId: attachment.id,
+      metadata: {
+        accessScope: "widget_session",
+        uploadedFrom: attachment.uploadedFrom,
+        fileName: attachment.fileName,
+        mimeType: attachment.mimeType,
+        fileSize: attachment.fileSize,
+        conversationId: attachment.conversationId,
+        ticketId: attachment.ticketId,
+        messageId: attachment.messageId,
+      },
+    });
+
     return this.readDownload(attachment);
   }
 
