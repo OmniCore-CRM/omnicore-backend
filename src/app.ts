@@ -8,6 +8,7 @@ import { notFoundHandler } from "@/core/middleware/not-found.middleware.js";
 import { env } from "@/config/env.js";
 import { prisma } from "@/config/db.js";
 import { requestIdMiddleware } from "@/core/middleware/request-id.middleware.js";
+import { requestProfileMiddleware } from "@/core/middleware/request-profile.middleware.js";
 import { accessLogMiddleware } from "@/core/middleware/access-log.middleware.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -36,6 +37,7 @@ app.use(
 app.use(helmet());
 
 app.use(requestIdMiddleware);
+app.use(requestProfileMiddleware);
 app.use(accessLogMiddleware);
 
 // Parse incoming request bodies

@@ -52,7 +52,6 @@ const ticketInclude = {
 
 const ticketListInclude = {
   assignee: { select: safeUserSelect },
-  team: true,
   customer: true,
   conversation: true,
 } satisfies Prisma.TicketInclude;

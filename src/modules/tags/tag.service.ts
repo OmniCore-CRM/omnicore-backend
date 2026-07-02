@@ -37,9 +37,61 @@ const uniqueTagError = new AppError(
   HTTP_STATUS.CONFLICT
 );
 
+const tagListCacheTtlMs = 30_000;
+
+type TagListCacheEntry = {
+  expiresAt: number;
+  tags: ReturnType<typeof mapTags>;
+};
+
 export class TagService {
+  private static readonly listCache = new Map<string, TagListCacheEntry>();
+
+  private static cacheKey(companyId: string, search?: string) {
+    return `${companyId}:${(search ?? "").toLowerCase()}`;
+  }
+
+  private static readListCache(companyId: string, search?: string) {
+    const key = this.cacheKey(companyId, search);
+    const entry = this.listCache.get(key);
+    if (!entry) return null;
+
+    if (entry.expiresAt <= Date.now()) {
+      this.listCache.delete(key);
+      return null;
+    }
+
+    return entry.tags;
+  }
+
+  private static writeListCache(
+    companyId: string,
+    search: string | undefined,
+    tags: ReturnType<typeof mapTags>,
+  ) {
+    this.listCache.set(this.cacheKey(companyId, search), {
+      expiresAt: Date.now() + tagListCacheTtlMs,
+      tags,
+    });
+  }
+
+  private static clearCompanyListCache(companyId: string) {
+    const prefix = `${companyId}:`;
+    for (const key of this.listCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.listCache.delete(key);
+      }
+    }
+  }
+
   static async getTags(companyId: string, query: TagListQueryInput) {
     const search = query.search?.trim();
+
+    const cached = this.readListCache(companyId, search);
+    if (cached) {
+      return cached;
+    }
+
     const tags = await prisma.tag.findMany({
       where: {
         companyId,
@@ -70,7 +122,9 @@ export class TagService {
       ],
     });
 
-    return mapTags(tags);
+    const mapped = mapTags(tags);
+    this.writeListCache(companyId, search, mapped);
+    return mapped;
   }
 
   static async createTag(user: UserContext, data: CreateTagInput) {
@@ -96,6 +150,8 @@ export class TagService {
           color: tag.color,
         },
       });
+
+      this.clearCompanyListCache(user.companyId);
 
       return mapTag(tag);
     } catch (error) {
@@ -143,6 +199,8 @@ export class TagService {
         },
       });
 
+      this.clearCompanyListCache(user.companyId);
+
       return mapTag(tag);
     } catch (error) {
       if (
@@ -176,6 +234,8 @@ export class TagService {
         name: existing.name,
       },
     });
+
+    this.clearCompanyListCache(user.companyId);
 
     return mapTag(existing);
   }

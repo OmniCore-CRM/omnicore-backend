@@ -144,22 +144,6 @@ export class MessageService {
     conversationId: string,
     params: PaginationParams
   ) {
-    // Ensure conversation belongs to authenticated tenant
-    const conversation = await prisma.conversation.findFirst({
-      where: {
-        id: conversationId,
-        companyId,
-      },
-    });
-
-    // Prevent foreign tenant message access
-    if (!conversation) {
-      throw new AppError(
-        "Conversation not found",
-        HTTP_STATUS.NOT_FOUND
-      );
-    }
-
     // Fetch ordered conversation messages
     const messages = await prisma.message.findMany({
       where: {
@@ -196,6 +180,26 @@ export class MessageService {
           }
         : {}),
     });
+
+    if (messages.length === 0) {
+      // Preserve 404 semantics when the conversation does not belong to tenant.
+      const conversation = await prisma.conversation.findFirst({
+        where: {
+          id: conversationId,
+          companyId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!conversation) {
+        throw new AppError(
+          "Conversation not found",
+          HTTP_STATUS.NOT_FOUND
+        );
+      }
+    }
 
     const page = toPaginatedResult(messages, params.limit);
 

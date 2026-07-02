@@ -39,36 +39,46 @@ export const protect = (
         throw unauthorized("Invalid token");
       }
 
-      const session = await prisma.authSession.findFirst({
-        where: {
-          id: decoded.sessionId,
-          userId: decoded.userId,
-          companyId: decoded.companyId,
-          revokedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              companyId: true,
-              role: true,
-              isActive: true,
-              company: { select: { id: true, isActive: true } },
-            },
-          },
-        },
-      });
+      const [session] = await prisma.$queryRaw<
+        {
+          sessionId: string;
+          userId: string;
+          companyId: string;
+          role: string;
+          userIsActive: boolean;
+          companyIsActive: boolean;
+        }[]
+      >`
+        SELECT
+          s."id" AS "sessionId",
+          s."userId" AS "userId",
+          s."companyId" AS "companyId",
+          u."role"::text AS "role",
+          u."isActive" AS "userIsActive",
+          c."isActive" AS "companyIsActive"
+        FROM "AuthSession" s
+        JOIN "User" u
+          ON u."id" = s."userId"
+         AND u."companyId" = s."companyId"
+        JOIN "Company" c
+          ON c."id" = s."companyId"
+        WHERE s."id" = ${decoded.sessionId}
+          AND s."userId" = ${decoded.userId}
+          AND s."companyId" = ${decoded.companyId}
+          AND s."revokedAt" IS NULL
+          AND s."expiresAt" > NOW()
+        LIMIT 1
+      `;
 
-      if (!session?.user.isActive || !session.user.company.isActive) {
+      if (!session?.userIsActive || !session.companyIsActive) {
         throw unauthorized("Session expired");
       }
 
       req.user = {
-        userId: session.user.id,
-        companyId: session.user.companyId,
-        role: session.user.role,
-        sessionId: session.id,
+        userId: session.userId,
+        companyId: session.companyId,
+        role: session.role as AccessTokenPayload["role"],
+        sessionId: session.sessionId,
       };
 
       next();
