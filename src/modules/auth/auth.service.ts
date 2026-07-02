@@ -177,7 +177,7 @@ export class AuthService {
       sessionId: updated.id,
     });
 
-    await AuditLogService.record({
+    void AuditLogService.record({
       companyId: session.user.companyId,
       actorId: session.user.id,
       action: "USER_SESSION_REFRESHED",
@@ -186,6 +186,16 @@ export class AuthService {
       metadata: {
         userId: session.user.id,
       },
+    }).catch(() => {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          event: "audit_log_write_failed",
+          action: "USER_SESSION_REFRESHED",
+          companyId: session.user.companyId,
+          entityId: updated.id,
+        }),
+      );
     });
 
     return {

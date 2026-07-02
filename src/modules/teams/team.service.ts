@@ -51,67 +51,76 @@ const teamInclude = {
   },
 } satisfies Prisma.TeamInclude;
 
+const teamListCacheTtlMs = 20_000;
+
+type TeamListCacheEntry = {
+  expiresAt: number;
+  value: ReturnType<typeof mapTeams>;
+};
+
 export class TeamService {
+  private static readonly listCache = new Map<string, TeamListCacheEntry>();
+
+  private static clearListCache(companyId: string) {
+    this.listCache.delete(companyId);
+  }
+
   static async list(companyId: string) {
-    const [
-      teams,
-      ticketCounts,
-      openTicketCounts,
-      conversationCounts,
-      openConversationCounts,
-    ] = await Promise.all([
+    const cached = this.listCache.get(companyId);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
+    const [teams, ticketCountRows, conversationCountRows] = await Promise.all([
       prisma.team.findMany({
         where: { companyId },
         include: teamInclude,
         orderBy: [{ name: "asc" }, { id: "asc" }],
       }),
-      prisma.ticket.groupBy({
-        by: ["teamId"],
-        where: { companyId, teamId: { not: null } },
-        _count: { _all: true },
-      }),
-      prisma.ticket.groupBy({
-        by: ["teamId"],
-        where: {
-          companyId,
-          teamId: { not: null },
-          status: { in: ["OPEN", "PENDING", "ESCALATED"] },
-        },
-        _count: { _all: true },
-      }),
-      prisma.conversation.groupBy({
-        by: ["teamId"],
-        where: { companyId, teamId: { not: null } },
-        _count: { _all: true },
-      }),
-      prisma.conversation.groupBy({
-        by: ["teamId"],
-        where: {
-          companyId,
-          teamId: { not: null },
-          status: { in: ["OPEN", "PENDING", "SNOOZED"] },
-        },
-        _count: { _all: true },
-      }),
+      prisma.$queryRaw<
+        Array<{ teamId: string; total: bigint; open: bigint }>
+      >`
+        SELECT
+          "teamId" AS "teamId",
+          COUNT(*)::bigint AS "total",
+          COUNT(*) FILTER (
+            WHERE "status" IN ('OPEN', 'PENDING', 'ESCALATED')
+          )::bigint AS "open"
+        FROM "Ticket"
+        WHERE "companyId" = ${companyId}
+          AND "teamId" IS NOT NULL
+        GROUP BY "teamId"
+      `,
+      prisma.$queryRaw<
+        Array<{ teamId: string; total: bigint; open: bigint }>
+      >`
+        SELECT
+          "teamId" AS "teamId",
+          COUNT(*)::bigint AS "total",
+          COUNT(*) FILTER (
+            WHERE "status" IN ('OPEN', 'PENDING', 'SNOOZED')
+          )::bigint AS "open"
+        FROM "Conversation"
+        WHERE "companyId" = ${companyId}
+          AND "teamId" IS NOT NULL
+        GROUP BY "teamId"
+      `,
     ]);
 
-    const toCountMap = (
-      rows: Array<{ teamId: string | null; _count: { _all: number } }>,
-    ) =>
-      new Map(
-        rows
-          .filter((row): row is { teamId: string; _count: { _all: number } } =>
-            Boolean(row.teamId),
-          )
-          .map((row) => [row.teamId, row._count._all]),
-      );
+    const ticketCountByTeam = new Map(
+      ticketCountRows.map((row) => [row.teamId, Number(row.total)]),
+    );
+    const openTicketCountByTeam = new Map(
+      ticketCountRows.map((row) => [row.teamId, Number(row.open)]),
+    );
+    const conversationCountByTeam = new Map(
+      conversationCountRows.map((row) => [row.teamId, Number(row.total)]),
+    );
+    const openConversationCountByTeam = new Map(
+      conversationCountRows.map((row) => [row.teamId, Number(row.open)]),
+    );
 
-    const ticketCountByTeam = toCountMap(ticketCounts);
-    const openTicketCountByTeam = toCountMap(openTicketCounts);
-    const conversationCountByTeam = toCountMap(conversationCounts);
-    const openConversationCountByTeam = toCountMap(openConversationCounts);
-
-    return mapTeams(
+    const mapped = mapTeams(
       teams.map((team) => ({
         ...team,
         ticketCount: ticketCountByTeam.get(team.id) ?? 0,
@@ -120,10 +129,18 @@ export class TeamService {
         openConversationCount: openConversationCountByTeam.get(team.id) ?? 0,
       })),
     );
+
+    this.listCache.set(companyId, {
+      expiresAt: Date.now() + teamListCacheTtlMs,
+      value: mapped,
+    });
+
+    return mapped;
   }
 
   static async create(user: UserContext, data: CreateTeamInput) {
     assertCanManageTeams(user);
+    this.clearListCache(user.companyId);
     const team = await prisma.team.create({
       data: { companyId: user.companyId, ...data },
       include: teamInclude,
@@ -144,6 +161,7 @@ export class TeamService {
   static async update(user: UserContext, teamId: string, data: UpdateTeamInput) {
     assertCanManageTeams(user);
     await this.assertTeam(user.companyId, teamId);
+    this.clearListCache(user.companyId);
     const team = await prisma.team.update({
       where: { id: teamId },
       data,
@@ -165,6 +183,7 @@ export class TeamService {
   static async remove(user: UserContext, teamId: string) {
     assertCanManageTeams(user);
     const team = await this.assertTeam(user.companyId, teamId);
+    this.clearListCache(user.companyId);
     await prisma.team.delete({ where: { id: teamId } });
     await AuditLogService.record({
       companyId: user.companyId,
@@ -182,6 +201,7 @@ export class TeamService {
   static async addMember(user: UserContext, teamId: string, memberId: string) {
     assertCanManageTeams(user);
     await this.assertTeam(user.companyId, teamId);
+    this.clearListCache(user.companyId);
     const member = await prisma.user.findFirst({
       where: { id: memberId, companyId: user.companyId },
       select: { id: true },
@@ -208,6 +228,7 @@ export class TeamService {
   static async removeMember(user: UserContext, teamId: string, memberId: string) {
     assertCanManageTeams(user);
     await this.assertTeam(user.companyId, teamId);
+    this.clearListCache(user.companyId);
     await prisma.teamMember.deleteMany({
       where: { teamId, userId: memberId, companyId: user.companyId },
     });
@@ -234,6 +255,7 @@ export class TeamService {
     if (data.teamId) await this.assertTeam(user.companyId, data.teamId);
     const changed = existing.teamId !== data.teamId;
     if (changed) {
+      this.clearListCache(user.companyId);
       await prisma.$transaction([
         prisma.ticket.update({ where: { id: ticketId }, data: { teamId: data.teamId } }),
         prisma.ticketActivity.create({
@@ -276,6 +298,7 @@ export class TeamService {
     if (data.teamId) await this.assertTeam(user.companyId, data.teamId);
     const changed = existing.teamId !== data.teamId;
     if (changed) {
+      this.clearListCache(user.companyId);
       await prisma.$transaction([
         prisma.conversation.update({ where: { id: conversationId }, data: { teamId: data.teamId } }),
         prisma.conversationActivity.create({

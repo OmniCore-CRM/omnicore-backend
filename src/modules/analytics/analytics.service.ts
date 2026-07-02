@@ -22,11 +22,33 @@ const getRangeStart = (range: AnalyticsRange) => {
 const createdAtWhere = (from: Date | null) =>
   from ? { createdAt: { gte: from } } : {};
 
+const analyticsOverviewCacheTtlMs = 30_000;
+
+type AnalyticsOverviewCacheEntry = {
+  expiresAt: number;
+  value: ReturnType<typeof mapAnalyticsOverview>;
+};
+
 export class AnalyticsService {
+  private static readonly overviewCache = new Map<
+    string,
+    AnalyticsOverviewCacheEntry
+  >();
+
+  private static cacheKey(companyId: string, range: AnalyticsRange) {
+    return `${companyId}:${range}`;
+  }
+
   static async overview(
     companyId: string,
     query: AnalyticsOverviewQueryInput
   ) {
+    const key = this.cacheKey(companyId, query.range);
+    const cached = this.overviewCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     const from = getRangeStart(query.range);
     const customerWhere: Prisma.CustomerWhereInput = {
       companyId,
@@ -117,7 +139,7 @@ export class AnalyticsService {
       }),
     ]);
 
-    return mapAnalyticsOverview({
+    const mapped = mapAnalyticsOverview({
       range: query.range,
       from,
       customerCount,
@@ -150,5 +172,12 @@ export class AnalyticsService {
       teams,
       recentActivity,
     });
+
+    this.overviewCache.set(key, {
+      expiresAt: Date.now() + analyticsOverviewCacheTtlMs,
+      value: mapped,
+    });
+
+    return mapped;
   }
 }

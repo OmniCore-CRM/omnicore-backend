@@ -69,7 +69,7 @@ const ticketDetailInclude = {
             id: "desc",
           },
         ],
-        take: 50,
+        take: 20,
       },
     },
   },
