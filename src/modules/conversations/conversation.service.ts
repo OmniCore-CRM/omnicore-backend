@@ -117,6 +117,26 @@ const conversationListSelect = {
   },
 } satisfies Prisma.ConversationSelect;
 
+const conversationDetailSelect = {
+  ...conversationListSelect,
+  attachments: {
+    orderBy: {
+      createdAt: "asc",
+    },
+  },
+  messages: {
+    orderBy: [
+      {
+        createdAt: "desc",
+      },
+      {
+        id: "desc",
+      },
+    ],
+    take: 1,
+  },
+} satisfies Prisma.ConversationSelect;
+
 const assertCanMutate = (user: UserContext) => {
   if (user.role === "VIEWER") {
     throw new AppError(
@@ -622,52 +642,7 @@ export class ConversationService {
         id: conversationId,
         companyId,
       },
-
-      include: {
-        customer: true,
-        team: true,
-        attachments: {
-          include: {
-            uploadedBy: { select: safeUserSelect },
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-        tags: {
-          include: {
-            tag: true,
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-        tickets: {
-          include: {
-            assignee: { select: safeUserSelect },
-          },
-          orderBy: [
-            {
-              updatedAt: "desc",
-            },
-            {
-              id: "desc",
-            },
-          ],
-        },
-
-        messages: {
-          orderBy: [
-            {
-              createdAt: "desc",
-            },
-            {
-              id: "desc",
-            },
-          ],
-          take: 1,
-        },
-      },
+      select: conversationDetailSelect,
     });
 
     // Prevent foreign tenant conversation access
@@ -794,15 +769,18 @@ export class ConversationService {
     conversationId: string
   ) {
     // Ensure conversation belongs to authenticated tenant
-    const conversation = await prisma.conversation.findFirst({
+    const conversation = await prisma.conversation.findUnique({
       where: {
         id: conversationId,
-        companyId,
+      },
+      select: {
+        id: true,
+        companyId: true,
       },
     });
 
     // Prevent foreign tenant access
-    if (!conversation) {
+    if (!conversation || conversation.companyId !== companyId) {
       throw new AppError(
         "Conversation not found",
         HTTP_STATUS.NOT_FOUND
