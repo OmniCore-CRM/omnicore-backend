@@ -1,15 +1,19 @@
 import type { Response } from "express";
+import { UserRole } from "@prisma/client";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { asyncHandler } from "@/core/utils/async-handler.js";
 import { sendResponse } from "@/core/utils/send-response.js";
 import { UserService } from "./user.service.js";
+import { userListQuerySchema } from "./user.validation.js";
 
 export class UserController {
   static getCompanyUsers = asyncHandler(
     async (req: AuthenticatedRequest, res: Response) => {
+      const query = userListQuerySchema.parse(req.query);
       const users = await UserService.getCompanyUsers(
-        req.user!.companyId
+        req.user!.companyId,
+        query,
       );
 
       return sendResponse({
@@ -19,5 +23,63 @@ export class UserController {
         data: users,
       });
     }
+  );
+
+  static createCompanyUser = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const user = await UserService.createCompanyUser({
+        actorId: req.user!.userId,
+        actorRole: req.user!.role as UserRole,
+        companyId: req.user!.companyId,
+        data: req.body,
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.CREATED,
+        message: "User created successfully",
+        data: user,
+      });
+    },
+  );
+
+  static updateCompanyUser = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const user = await UserService.updateCompanyUser({
+        actorId: req.user!.userId,
+        actorUserId: req.user!.userId,
+        actorRole: req.user!.role as UserRole,
+        companyId: req.user!.companyId,
+        userId: req.params.id as string,
+        data: req.body,
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "User updated successfully",
+        data: user,
+      });
+    },
+  );
+
+  static updateCompanyUserStatus = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const user = await UserService.updateCompanyUserStatus({
+        actorId: req.user!.userId,
+        actorUserId: req.user!.userId,
+        actorRole: req.user!.role as UserRole,
+        companyId: req.user!.companyId,
+        userId: req.params.id as string,
+        data: req.body,
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "User status updated successfully",
+        data: user,
+      });
+    },
   );
 }

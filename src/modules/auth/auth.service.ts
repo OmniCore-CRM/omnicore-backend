@@ -141,7 +141,7 @@ export class AuthService {
   }
 
   private static assertActive(user: UserWithCompany) {
-    if (!user.isActive || !user.company.isActive) {
+    if (!user.isActive || user.status !== "ACTIVE" || !user.company.isActive) {
       throw invalidSessionError();
     }
   }
@@ -184,6 +184,8 @@ export class AuthService {
           email,
           passwordHash,
           role: "OWNER",
+          status: "ACTIVE",
+          isActive: true,
           companyId: company.id,
         },
         include: { company: true },
@@ -244,7 +246,12 @@ export class AuthService {
       include: { company: true },
     });
 
-    if (!user || !user.isActive || !user.company.isActive) {
+    if (
+      !user ||
+      !user.isActive ||
+      user.status !== "ACTIVE" ||
+      !user.company.isActive
+    ) {
       return;
     }
 
@@ -490,7 +497,13 @@ export class AuthService {
   // ===== Return authenticated session user =====
   static async getCurrentUser(userId: string, companyId: string) {
     const user = await prisma.user.findFirst({
-      where: { id: userId, companyId, isActive: true, company: { isActive: true } },
+      where: {
+        id: userId,
+        companyId,
+        isActive: true,
+        status: "ACTIVE",
+        company: { isActive: true },
+      },
       include: { company: true },
     });
 

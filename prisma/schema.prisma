@@ -17,6 +17,13 @@ enum UserRole {
   VIEWER
 }
 
+enum UserLifecycleStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
 enum ConversationChannel {
   WEBSITE
   WHATSAPP
@@ -164,6 +171,7 @@ model User {
 
   role     UserRole @default(AGENT)
   isActive Boolean  @default(true)
+  status   UserLifecycleStatus @default(ACTIVE)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
@@ -184,6 +192,7 @@ model User {
   passwordResetTokens    PasswordResetToken[]
 
   @@index([companyId, firstName, lastName])
+  @@index([companyId, status, firstName, lastName])
 }
 
 model PasswordResetToken {

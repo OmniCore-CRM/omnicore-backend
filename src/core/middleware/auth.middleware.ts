@@ -46,6 +46,7 @@ export const protect = (
           companyId: string;
           role: string;
           userIsActive: boolean;
+          userStatus: string;
           companyIsActive: boolean;
         }[]
       >`
@@ -55,6 +56,7 @@ export const protect = (
           s."companyId" AS "companyId",
           u."role"::text AS "role",
           u."isActive" AS "userIsActive",
+          u."status"::text AS "userStatus",
           c."isActive" AS "companyIsActive"
         FROM "AuthSession" s
         JOIN "User" u
@@ -70,7 +72,11 @@ export const protect = (
         LIMIT 1
       `;
 
-      if (!session?.userIsActive || !session.companyIsActive) {
+      if (
+        !session?.userIsActive ||
+        session.userStatus !== "ACTIVE" ||
+        !session.companyIsActive
+      ) {
         throw unauthorized("Session expired");
       }
 

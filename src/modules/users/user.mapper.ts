@@ -7,6 +7,7 @@ type SafeUser = Pick<
   | "firstName"
   | "lastName"
   | "role"
+  | "status"
   | "companyId"
   | "createdAt"
   | "updatedAt"
@@ -23,6 +24,8 @@ export const mapUser = (user: SafeUser) => {
     lastName: user.lastName,
 
     role: user.role,
+
+    status: user.status,
 
     companyId: user.companyId,
 
