@@ -159,6 +159,7 @@ model Company {
   emailAccounts          EmailAccount[]
   whatsAppAccounts       WhatsAppAccount[]
   authSessions           AuthSession[]
+  userInviteTokens       UserInviteToken[]
 }
 
 model User {
@@ -190,9 +191,39 @@ model User {
   auditLogs              AuditLog[]             @relation("AuditLogActor")
   authSessions           AuthSession[]
   passwordResetTokens    PasswordResetToken[]
+  sentInviteTokens       UserInviteToken[]     @relation("UserInviteActor")
+  receivedInviteTokens   UserInviteToken[]     @relation("UserInviteTarget")
 
   @@index([companyId, firstName, lastName])
   @@index([companyId, status, firstName, lastName])
+}
+
+model UserInviteToken {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("UserInviteTarget", fields: [userId], references: [id], onDelete: Cascade)
+
+  invitedById String?
+  invitedBy   User?   @relation("UserInviteActor", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  tokenHash String @unique
+
+  expiresAt  DateTime
+  consumedAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([invitedById])
+  @@index([expiresAt])
+  @@index([consumedAt])
+  @@index([revokedAt])
 }
 
 model PasswordResetToken {

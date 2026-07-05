@@ -42,4 +42,25 @@ router.patch(
 	UserController.updateCompanyUserStatus,
 );
 
+router.post(
+	"/:id/invite",
+	protect,
+	authorize(...RBAC.admin),
+	UserController.sendCompanyUserInvite,
+);
+
+router.post(
+	"/:id/invite/resend",
+	protect,
+	authorize(...RBAC.admin),
+	UserController.resendCompanyUserInvite,
+);
+
+router.post(
+	"/:id/invite/revoke",
+	protect,
+	authorize(...RBAC.admin),
+	UserController.revokeCompanyUserInvite,
+);
+
 export default router;

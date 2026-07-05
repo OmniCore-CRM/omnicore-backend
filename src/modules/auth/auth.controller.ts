@@ -11,6 +11,7 @@ import {
   REFRESH_COOKIE_NAME,
   setRefreshCookie,
 } from "./auth.utils.js";
+import { validateInviteQuerySchema } from "./auth.validation.js";
 
 const sendIssuedAuth = ({
   res,
@@ -74,6 +75,29 @@ export class AuthController {
       res,
       statusCode: HTTP_STATUS.OK,
       message: "Password reset successful",
+    });
+  });
+
+  static validateInvite = asyncHandler(async (req: Request, res: Response) => {
+    const { token } = validateInviteQuerySchema.parse(req.query);
+    const invite = await AuthService.validateInviteToken(token);
+
+    return sendResponse({
+      res,
+      statusCode: HTTP_STATUS.OK,
+      message: "Invite token is valid",
+      data: invite,
+    });
+  });
+
+  static acceptInvite = asyncHandler(async (req: Request, res: Response) => {
+    const accepted = await AuthService.acceptInvite(req.body);
+
+    return sendResponse({
+      res,
+      statusCode: HTTP_STATUS.OK,
+      message: "Invite accepted successfully",
+      data: accepted,
     });
   });
 

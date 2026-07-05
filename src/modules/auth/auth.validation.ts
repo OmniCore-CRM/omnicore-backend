@@ -48,6 +48,19 @@ export const resetPasswordSchema = z.object({
 
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
+export const acceptInviteSchema = z.object({
+  token: z.string().min(16, "Invite token is invalid"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
+
+export const validateInviteQuerySchema = z.object({
+  token: z.string().min(16, "Invite token is invalid"),
+});
+
+export type ValidateInviteQueryInput = z.infer<typeof validateInviteQuerySchema>;
+
 // ===== Authenticated JWT request payload =====
 export interface AuthenticatedUser {
   userId: string;

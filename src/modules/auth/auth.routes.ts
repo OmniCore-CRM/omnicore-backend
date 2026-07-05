@@ -6,6 +6,7 @@ import {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  acceptInviteSchema,
 } from "./auth.validation.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
@@ -54,6 +55,27 @@ router.post(
   }),
   validateRequest(resetPasswordSchema),
   AuthController.resetPassword
+);
+
+router.get(
+  "/invite/validate",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    keyPrefix: "auth:invite:validate",
+  }),
+  AuthController.validateInvite,
+);
+
+router.post(
+  "/invite/accept",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 25,
+    keyPrefix: "auth:invite:accept",
+  }),
+  validateRequest(acceptInviteSchema),
+  AuthController.acceptInvite,
 );
 
 router.post(

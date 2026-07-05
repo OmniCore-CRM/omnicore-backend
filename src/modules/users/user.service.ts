@@ -8,6 +8,7 @@ import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { AuthService } from "@/modules/auth/auth.service.js";
 import { mapUsers } from "./user.mapper.js";
 import type {
   CreateUserInput,
@@ -20,7 +21,7 @@ const userListCacheTtlMs = 30_000;
 
 type UserListCacheEntry = {
   expiresAt: number;
-  users: ReturnType<typeof mapUsers>;
+  users: Array<Record<string, unknown>>;
 };
 
 export class UserService {
@@ -35,6 +36,94 @@ export class UserService {
 
   private static clearListCache(companyId: string) {
     this.listCache.delete(companyId);
+  }
+
+  private static serializeUserWithInvite(
+    user: {
+      id: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      role: UserRole;
+      status: UserLifecycleStatus;
+      companyId: string;
+      createdAt: Date;
+      updatedAt: Date;
+      receivedInviteTokens?: Array<{
+        id: string;
+        createdAt: Date;
+        expiresAt: Date;
+        revokedAt: Date | null;
+        consumedAt: Date | null;
+      }>;
+    },
+  ) {
+    const mapped = mapUsers([user])[0] as Record<string, unknown>;
+    const latestInvite = user.receivedInviteTokens?.[0] ?? null;
+
+    if (user.status !== UserLifecycleStatus.INVITED || !latestInvite) {
+      return {
+        ...mapped,
+        invitationState: "NONE",
+        invitationSentAt: null,
+        invitationExpiresAt: null,
+      };
+    }
+
+    const now = Date.now();
+    const invitationState = latestInvite.consumedAt
+      ? "ACCEPTED"
+      : latestInvite.revokedAt
+        ? "REVOKED"
+        : latestInvite.expiresAt.getTime() <= now
+          ? "EXPIRED"
+          : "PENDING";
+
+    return {
+      ...mapped,
+      invitationState,
+      invitationSentAt: latestInvite.createdAt,
+      invitationExpiresAt: latestInvite.expiresAt,
+    };
+  }
+
+  private static async getUserForManagement(companyId: string, userId: string) {
+    const user = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        companyId,
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        status: true,
+        companyId: true,
+        createdAt: true,
+        updatedAt: true,
+        receivedInviteTokens: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+          select: {
+            id: true,
+            createdAt: true,
+            expiresAt: true,
+            revokedAt: true,
+            consumedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new AppError("User not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return user;
   }
 
   private static assertCanManageUsers(actorRole: UserRole) {
@@ -131,6 +220,19 @@ export class UserService {
         companyId: true,
         createdAt: true,
         updatedAt: true,
+        receivedInviteTokens: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+          select: {
+            id: true,
+            createdAt: true,
+            expiresAt: true,
+            revokedAt: true,
+            consumedAt: true,
+          },
+        },
       },
       orderBy: [
         {
@@ -142,7 +244,7 @@ export class UserService {
       ],
     });
 
-    const mapped = mapUsers(users);
+    const mapped = users.map((item) => this.serializeUserWithInvite(item));
 
     if (!hasFilter) {
       this.listCache.set(cacheKey, {
@@ -205,7 +307,7 @@ export class UserService {
         },
       });
 
-      return mapUsers([created])[0];
+      return this.serializeUserWithInvite(created);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -323,7 +425,7 @@ export class UserService {
         });
       }
 
-      return mapUsers([updated])[0];
+      return this.serializeUserWithInvite(updated);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -418,6 +520,155 @@ export class UserService {
       });
     }
 
-    return mapUsers([updated])[0];
+    return this.serializeUserWithInvite(updated);
+  }
+
+  static async sendCompanyUserInvite(input: {
+    actorId: string;
+    actorUserId: string;
+    actorRole: UserRole;
+    companyId: string;
+    userId: string;
+    mode: "invite" | "resend";
+  }) {
+    this.assertCanManageUsers(input.actorRole);
+
+    if (input.actorUserId === input.userId) {
+      throw new AppError(
+        "You cannot send an invite to your own account",
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    const existing = await this.getUserForManagement(input.companyId, input.userId);
+    this.assertManageableTarget(input.actorRole, existing.role);
+
+    if (existing.status !== UserLifecycleStatus.INVITED) {
+      throw new AppError(
+        "Only invited users can receive onboarding links",
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    const actor = await prisma.user.findFirst({
+      where: {
+        id: input.actorId,
+        companyId: input.companyId,
+      },
+      select: {
+        firstName: true,
+        lastName: true,
+      },
+    });
+
+    const inviterName = actor
+      ? [actor.firstName, actor.lastName].filter(Boolean).join(" ")
+      : "Your OmniCore admin";
+
+    const payload = AuthService.createInviteTokenPayload();
+    const now = new Date();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.userInviteToken.updateMany({
+        where: {
+          companyId: input.companyId,
+          userId: input.userId,
+          consumedAt: null,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: now,
+        },
+      });
+
+      await tx.userInviteToken.create({
+        data: {
+          companyId: input.companyId,
+          userId: input.userId,
+          invitedById: input.actorId,
+          tokenHash: payload.tokenHash,
+          expiresAt: payload.expiresAt,
+        },
+      });
+    });
+
+    const emailDelivered = await AuthService.sendUserInviteEmail({
+      toEmail: existing.email,
+      firstName: existing.firstName,
+      inviterName,
+      inviteUrl: payload.inviteUrl,
+      expiresAt: payload.expiresAt,
+    });
+
+    await AuditLogService.record({
+      companyId: input.companyId,
+      actorId: input.actorId,
+      action: input.mode === "resend" ? "USER_INVITE_RESENT" : "USER_INVITE_SENT",
+      entityType: "USER",
+      entityId: input.userId,
+      metadata: {
+        expiresAt: payload.expiresAt.toISOString(),
+        emailDelivery: emailDelivered ? "sent" : "failed_or_not_configured",
+      },
+    });
+
+    this.clearListCache(input.companyId);
+    const refreshed = await this.getUserForManagement(input.companyId, input.userId);
+    return this.serializeUserWithInvite(refreshed);
+  }
+
+  static async revokeCompanyUserInvite(input: {
+    actorId: string;
+    actorUserId: string;
+    actorRole: UserRole;
+    companyId: string;
+    userId: string;
+  }) {
+    this.assertCanManageUsers(input.actorRole);
+
+    if (input.actorUserId === input.userId) {
+      throw new AppError(
+        "You cannot revoke your own invite",
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    const existing = await this.getUserForManagement(input.companyId, input.userId);
+    this.assertManageableTarget(input.actorRole, existing.role);
+
+    if (existing.status !== UserLifecycleStatus.INVITED) {
+      throw new AppError(
+        "Only invited users can have invites revoked",
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    const now = new Date();
+    const result = await prisma.userInviteToken.updateMany({
+      where: {
+        companyId: input.companyId,
+        userId: input.userId,
+        consumedAt: null,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: now,
+      },
+    });
+
+    await AuditLogService.record({
+      companyId: input.companyId,
+      actorId: input.actorId,
+      action: "USER_INVITE_REVOKED",
+      entityType: "USER",
+      entityId: input.userId,
+      metadata: {
+        revokedTokenCount: result.count,
+      },
+    });
+
+    this.clearListCache(input.companyId);
+    const refreshed = await this.getUserForManagement(input.companyId, input.userId);
+    return this.serializeUserWithInvite(refreshed);
   }
 }

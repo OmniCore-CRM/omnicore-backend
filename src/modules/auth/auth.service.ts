@@ -8,6 +8,7 @@ import type {
   LoginInput,
   ForgotPasswordInput,
   ResetPasswordInput,
+  AcceptInviteInput,
 } from "./auth.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -28,12 +29,18 @@ type IssuedAuth = {
 };
 
 const PASSWORD_RESET_TOKEN_MINUTES = 30;
+const USER_INVITE_TOKEN_MINUTES = 60 * 24 * 3;
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const createPasswordResetToken = () => randomBytes(32).toString("base64url");
 
+const createUserInviteToken = () => randomBytes(32).toString("base64url");
+
 const hashPasswordResetToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
+
+const hashUserInviteToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
 const createPasswordResetExpiry = () => {
@@ -42,15 +49,94 @@ const createPasswordResetExpiry = () => {
   return expiresAt;
 };
 
+const createUserInviteExpiry = () => {
+  const expiresAt = new Date();
+  expiresAt.setUTCMinutes(expiresAt.getUTCMinutes() + USER_INVITE_TOKEN_MINUTES);
+  return expiresAt;
+};
+
 const buildResetPasswordUrl = (token: string) => {
   const base = env.APP_ORIGINS[0] ?? "http://localhost:3000";
   return `${base.replace(/\/+$/, "")}/reset-password?token=${encodeURIComponent(token)}`;
+};
+
+const buildAcceptInviteUrl = (token: string) => {
+  const base = env.APP_ORIGINS[0] ?? "http://localhost:3000";
+  return `${base.replace(/\/+$/, "")}/accept-invite?token=${encodeURIComponent(token)}`;
 };
 
 const invalidSessionError = () =>
   new AppError("Session expired", HTTP_STATUS.UNAUTHORIZED);
 
 export class AuthService {
+  static async sendUserInviteEmail(input: {
+    toEmail: string;
+    firstName: string;
+    inviterName: string;
+    inviteUrl: string;
+    expiresAt: Date;
+  }) {
+    if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          event: "user_invite_email_not_configured",
+        })
+      );
+      return false;
+    }
+
+    const expiryHours = Math.max(
+      1,
+      Math.ceil((input.expiresAt.getTime() - Date.now()) / (60 * 60 * 1000)),
+    );
+
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: env.EMAIL_FROM,
+          to: [input.toEmail],
+          subject: "You are invited to OmniCore",
+          text: [
+            `Hi ${input.firstName},`,
+            "",
+            `${input.inviterName} invited you to OmniCore.`,
+            `Set your password and activate your account here: ${input.inviteUrl}`,
+            "",
+            `This invite link expires in ${expiryHours} hours and can be used once.`,
+            "If you did not expect this invite, you can ignore this email.",
+          ].join("\n"),
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "user_invite_email_send_failed",
+            providerStatus: response.status,
+          })
+        );
+        return false;
+      }
+
+      return true;
+    } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          event: "user_invite_email_provider_unavailable",
+        })
+      );
+      return false;
+    }
+  }
+
   private static async sendPasswordResetEmail(input: {
     toEmail: string;
     firstName: string;
@@ -357,6 +443,161 @@ export class AuthService {
         revokedSessionsAt: now.toISOString(),
       },
     });
+  }
+
+  static async validateInviteToken(token: string) {
+    const tokenHash = hashUserInviteToken(token);
+    const now = new Date();
+
+    const invite = await prisma.userInviteToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          include: {
+            company: true,
+          },
+        },
+      },
+    });
+
+    if (!invite) {
+      throw new AppError("Invite link is invalid or has expired", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (invite.revokedAt || invite.consumedAt || invite.expiresAt <= now) {
+      const action = invite.expiresAt <= now ? "USER_INVITE_EXPIRED" : "USER_INVITE_INVALID_ATTEMPT";
+      await AuditLogService.record({
+        companyId: invite.companyId,
+        actorId: invite.userId,
+        action,
+        entityType: "USER",
+        entityId: invite.userId,
+        metadata: {
+          reason: invite.expiresAt <= now ? "expired" : invite.revokedAt ? "revoked" : "consumed",
+        },
+      });
+
+      throw new AppError("Invite link is invalid or has expired", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (!invite.user.company.isActive || invite.user.status !== "INVITED") {
+      throw new AppError("Invite link is invalid or has expired", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    return {
+      firstName: invite.user.firstName,
+      lastName: invite.user.lastName,
+      email: invite.user.email,
+      companyName: invite.user.company.name,
+      expiresAt: invite.expiresAt,
+    };
+  }
+
+  static async acceptInvite(data: AcceptInviteInput) {
+    const tokenHash = hashUserInviteToken(data.token);
+    const now = new Date();
+
+    const invite = await prisma.userInviteToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          include: {
+            company: true,
+          },
+        },
+      },
+    });
+
+    if (!invite) {
+      throw new AppError("Invite link is invalid or has expired", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (invite.revokedAt || invite.consumedAt || invite.expiresAt <= now) {
+      const action = invite.expiresAt <= now ? "USER_INVITE_EXPIRED" : "USER_INVITE_INVALID_ATTEMPT";
+      await AuditLogService.record({
+        companyId: invite.companyId,
+        actorId: invite.userId,
+        action,
+        entityType: "USER",
+        entityId: invite.userId,
+        metadata: {
+          reason: invite.expiresAt <= now ? "expired" : invite.revokedAt ? "revoked" : "consumed",
+        },
+      });
+
+      throw new AppError("Invite link is invalid or has expired", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    if (
+      !invite.user.company.isActive ||
+      invite.user.status !== "INVITED"
+    ) {
+      throw new AppError("Invite link is invalid or has expired", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, 10);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: {
+          id: invite.userId,
+        },
+        data: {
+          passwordHash,
+          status: "ACTIVE",
+          isActive: true,
+        },
+      });
+
+      await tx.userInviteToken.update({
+        where: {
+          id: invite.id,
+        },
+        data: {
+          consumedAt: now,
+        },
+      });
+
+      await tx.userInviteToken.updateMany({
+        where: {
+          userId: invite.userId,
+          id: {
+            not: invite.id,
+          },
+          consumedAt: null,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: now,
+        },
+      });
+    });
+
+    await AuditLogService.record({
+      companyId: invite.companyId,
+      actorId: invite.userId,
+      action: "USER_INVITE_ACCEPTED",
+      entityType: "USER",
+      entityId: invite.userId,
+      metadata: {
+        tokenIssuedAt: invite.createdAt.toISOString(),
+      },
+    });
+
+    return {
+      email: invite.user.email,
+      firstName: invite.user.firstName,
+    };
+  }
+
+  static createInviteTokenPayload() {
+    const plainToken = createUserInviteToken();
+    return {
+      plainToken,
+      tokenHash: hashUserInviteToken(plainToken),
+      expiresAt: createUserInviteExpiry(),
+      inviteUrl: buildAcceptInviteUrl(plainToken),
+    };
   }
 
   static async refresh(refreshToken: string | undefined): Promise<IssuedAuth> {

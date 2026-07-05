@@ -82,4 +82,63 @@ export class UserController {
       });
     },
   );
+
+  static sendCompanyUserInvite = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const user = await UserService.sendCompanyUserInvite({
+        actorId: req.user!.userId,
+        actorUserId: req.user!.userId,
+        actorRole: req.user!.role as UserRole,
+        companyId: req.user!.companyId,
+        userId: req.params.id as string,
+        mode: "invite",
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Invite sent successfully",
+        data: user,
+      });
+    },
+  );
+
+  static resendCompanyUserInvite = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const user = await UserService.sendCompanyUserInvite({
+        actorId: req.user!.userId,
+        actorUserId: req.user!.userId,
+        actorRole: req.user!.role as UserRole,
+        companyId: req.user!.companyId,
+        userId: req.params.id as string,
+        mode: "resend",
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Invite resent successfully",
+        data: user,
+      });
+    },
+  );
+
+  static revokeCompanyUserInvite = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const user = await UserService.revokeCompanyUserInvite({
+        actorId: req.user!.userId,
+        actorUserId: req.user!.userId,
+        actorRole: req.user!.role as UserRole,
+        companyId: req.user!.companyId,
+        userId: req.params.id as string,
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Invite revoked successfully",
+        data: user,
+      });
+    },
+  );
 }
