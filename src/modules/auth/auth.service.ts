@@ -1,7 +1,14 @@
 import bcrypt from "bcrypt";
+import { createHash, randomBytes } from "node:crypto";
 import type { Company, Prisma, User } from "@prisma/client";
 import { prisma } from "@/config/db.js";
-import type { RegisterInput, LoginInput } from "./auth.validation.js";
+import { env } from "@/config/env.js";
+import type {
+  RegisterInput,
+  LoginInput,
+  ForgotPasswordInput,
+  ResetPasswordInput,
+} from "./auth.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import {
@@ -20,10 +27,91 @@ type IssuedAuth = {
   refreshExpiresAt: Date;
 };
 
+const PASSWORD_RESET_TOKEN_MINUTES = 30;
+
+const normalizeEmail = (value: string) => value.trim().toLowerCase();
+
+const createPasswordResetToken = () => randomBytes(32).toString("base64url");
+
+const hashPasswordResetToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
+
+const createPasswordResetExpiry = () => {
+  const expiresAt = new Date();
+  expiresAt.setUTCMinutes(expiresAt.getUTCMinutes() + PASSWORD_RESET_TOKEN_MINUTES);
+  return expiresAt;
+};
+
+const buildResetPasswordUrl = (token: string) => {
+  const base = env.APP_ORIGINS[0] ?? "http://localhost:3000";
+  return `${base.replace(/\/+$/, "")}/reset-password?token=${encodeURIComponent(token)}`;
+};
+
 const invalidSessionError = () =>
   new AppError("Session expired", HTTP_STATUS.UNAUTHORIZED);
 
 export class AuthService {
+  private static async sendPasswordResetEmail(input: {
+    toEmail: string;
+    firstName: string;
+    resetUrl: string;
+  }) {
+    if (!env.RESEND_API_KEY || !env.EMAIL_FROM) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          event: "password_reset_email_not_configured",
+        })
+      );
+      return false;
+    }
+
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: env.EMAIL_FROM,
+          to: [input.toEmail],
+          subject: "Reset your OmniCore password",
+          text: [
+            `Hi ${input.firstName},`,
+            "",
+            "We received a request to reset your OmniCore password.",
+            `Use this secure link to set a new password: ${input.resetUrl}`,
+            "",
+            "This link expires in 30 minutes and can be used once.",
+            "If you did not request this reset, you can ignore this email.",
+          ].join("\n"),
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "password_reset_email_send_failed",
+            providerStatus: response.status,
+          })
+        );
+        return false;
+      }
+
+      return true;
+    } catch {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          event: "password_reset_email_provider_unavailable",
+        })
+      );
+      return false;
+    }
+  }
+
   private static async issueSession(
     tx: Prisma.TransactionClient,
     user: Pick<User, "id" | "companyId" | "role">
@@ -141,6 +229,127 @@ export class AuthService {
     });
 
     return this.toIssuedAuth(user, issued);
+  }
+
+  static async forgotPassword(data: ForgotPasswordInput) {
+    const email = normalizeEmail(data.email);
+
+    const user = await prisma.user.findFirst({
+      where: {
+        email: {
+          equals: email,
+          mode: "insensitive",
+        },
+      },
+      include: { company: true },
+    });
+
+    if (!user || !user.isActive || !user.company.isActive) {
+      return;
+    }
+
+    const plainToken = createPasswordResetToken();
+    const tokenHash = hashPasswordResetToken(plainToken);
+    const expiresAt = createPasswordResetExpiry();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.passwordResetToken.deleteMany({
+        where: {
+          userId: user.id,
+          consumedAt: null,
+        },
+      });
+
+      await tx.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          tokenHash,
+          expiresAt,
+        },
+      });
+    });
+
+    const sent = await this.sendPasswordResetEmail({
+      toEmail: user.email,
+      firstName: user.firstName,
+      resetUrl: buildResetPasswordUrl(plainToken),
+    });
+
+    await AuditLogService.record({
+      companyId: user.companyId,
+      actorId: user.id,
+      action: "USER_PASSWORD_RESET_REQUESTED",
+      entityType: "USER",
+      entityId: user.id,
+      metadata: {
+        emailDelivery: sent ? "sent" : "failed_or_not_configured",
+      },
+    });
+  }
+
+  static async resetPassword(data: ResetPasswordInput) {
+    const tokenHash = hashPasswordResetToken(data.token);
+    const now = new Date();
+
+    const reset = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: {
+        user: {
+          include: {
+            company: true,
+          },
+        },
+      },
+    });
+
+    if (!reset || reset.consumedAt || reset.expiresAt <= now) {
+      throw new AppError(
+        "Reset link is invalid or has expired",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    this.assertActive(reset.user);
+
+    const passwordHash = await bcrypt.hash(data.password, 10);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: reset.userId },
+        data: { passwordHash },
+      });
+
+      await tx.passwordResetToken.updateMany({
+        where: {
+          userId: reset.userId,
+          consumedAt: null,
+        },
+        data: {
+          consumedAt: now,
+        },
+      });
+
+      await tx.authSession.updateMany({
+        where: {
+          userId: reset.userId,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: now,
+        },
+      });
+    });
+
+    await AuditLogService.record({
+      companyId: reset.user.companyId,
+      actorId: reset.user.id,
+      action: "USER_PASSWORD_RESET_COMPLETED",
+      entityType: "USER",
+      entityId: reset.user.id,
+      metadata: {
+        revokedSessionsAt: now.toISOString(),
+      },
+    });
   }
 
   static async refresh(refreshToken: string | undefined): Promise<IssuedAuth> {

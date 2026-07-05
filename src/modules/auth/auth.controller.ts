@@ -56,6 +56,27 @@ export class AuthController {
     });
   });
 
+  static forgotPassword = asyncHandler(async (req: Request, res: Response) => {
+    await AuthService.forgotPassword(req.body);
+
+    return sendResponse({
+      res,
+      statusCode: HTTP_STATUS.OK,
+      message:
+        "If an account exists for that email, a password reset link has been sent",
+    });
+  });
+
+  static resetPassword = asyncHandler(async (req: Request, res: Response) => {
+    await AuthService.resetPassword(req.body);
+
+    return sendResponse({
+      res,
+      statusCode: HTTP_STATUS.OK,
+      message: "Password reset successful",
+    });
+  });
+
   static refresh = asyncHandler(async (req: Request, res: Response) => {
     const issued = await AuthService.refresh(req.cookies?.[REFRESH_COOKIE_NAME]);
 

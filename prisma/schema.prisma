@@ -181,8 +181,25 @@ model User {
   attachments            Attachment[]           @relation("AttachmentUploader")
   auditLogs              AuditLog[]             @relation("AuditLogActor")
   authSessions           AuthSession[]
+  passwordResetTokens    PasswordResetToken[]
 
   @@index([companyId, firstName, lastName])
+}
+
+model PasswordResetToken {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([consumedAt])
 }
 
 model AuthSession {

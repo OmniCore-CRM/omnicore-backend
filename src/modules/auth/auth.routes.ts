@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { AuthController } from "./auth.controller.js";
 import { validateRequest } from "@/core/middleware/validate.middleware.js";
-import { registerSchema, loginSchema } from "./auth.validation.js";
+import {
+  registerSchema,
+  loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+} from "./auth.validation.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 
@@ -27,6 +32,28 @@ router.post(
   }),
   validateRequest(loginSchema),
   AuthController.login
+);
+
+router.post(
+  "/forgot-password",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 15,
+    keyPrefix: "auth:forgot-password",
+  }),
+  validateRequest(forgotPasswordSchema),
+  AuthController.forgotPassword
+);
+
+router.post(
+  "/reset-password",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    keyPrefix: "auth:reset-password",
+  }),
+  validateRequest(resetPasswordSchema),
+  AuthController.resetPassword
 );
 
 router.post(
