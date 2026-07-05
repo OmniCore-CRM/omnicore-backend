@@ -6,6 +6,8 @@ import type {
   AnalyticsRange,
 } from "./analytics.validation.js";
 
+type AnalyticsOverviewRange = AnalyticsRange | "custom";
+
 const rangeDays: Record<Exclude<AnalyticsRange, "all">, number> = {
   "7d": 7,
   "30d": 30,
@@ -19,8 +21,36 @@ const getRangeStart = (range: AnalyticsRange) => {
   return from;
 };
 
-const createdAtWhere = (from: Date | null) =>
-  from ? { createdAt: { gte: from } } : {};
+const parseIsoDayStart = (value: string) =>
+  new Date(`${value}T00:00:00.000Z`);
+
+const parseIsoDayEnd = (value: string) =>
+  new Date(`${value}T23:59:59.999Z`);
+
+const createdAtWhere = (from: Date | null, to: Date) =>
+  from
+    ? { createdAt: { gte: from, lte: to } }
+    : { createdAt: { lte: to } };
+
+const resolveWindow = (query: AnalyticsOverviewQueryInput): {
+  range: AnalyticsOverviewRange;
+  from: Date | null;
+  to: Date;
+} => {
+  if (query.startDate && query.endDate) {
+    return {
+      range: "custom",
+      from: parseIsoDayStart(query.startDate),
+      to: parseIsoDayEnd(query.endDate),
+    };
+  }
+
+  return {
+    range: query.range,
+    from: getRangeStart(query.range),
+    to: new Date(),
+  };
+};
 
 const analyticsOverviewCacheTtlMs = 30_000;
 
@@ -35,40 +65,48 @@ export class AnalyticsService {
     AnalyticsOverviewCacheEntry
   >();
 
-  private static cacheKey(companyId: string, range: AnalyticsRange) {
-    return `${companyId}:${range}`;
+  private static cacheKey(
+    companyId: string,
+    window: { range: AnalyticsOverviewRange; from: Date | null; to: Date }
+  ) {
+    return [
+      companyId,
+      window.range,
+      window.from?.toISOString() ?? "null",
+      window.to.toISOString(),
+    ].join(":");
   }
 
   static async overview(
     companyId: string,
     query: AnalyticsOverviewQueryInput
   ) {
-    const key = this.cacheKey(companyId, query.range);
+    const window = resolveWindow(query);
+    const key = this.cacheKey(companyId, window);
     const cached = this.overviewCache.get(key);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value;
     }
 
-    const from = getRangeStart(query.range);
     const customerWhere: Prisma.CustomerWhereInput = {
       companyId,
-      ...createdAtWhere(from),
+      ...createdAtWhere(window.from, window.to),
     };
     const conversationWhere: Prisma.ConversationWhereInput = {
       companyId,
-      ...createdAtWhere(from),
+      ...createdAtWhere(window.from, window.to),
     };
     const ticketWhere: Prisma.TicketWhereInput = {
       companyId,
-      ...createdAtWhere(from),
+      ...createdAtWhere(window.from, window.to),
     };
     const attachmentWhere: Prisma.AttachmentWhereInput = {
       companyId,
-      ...createdAtWhere(from),
+      ...createdAtWhere(window.from, window.to),
     };
     const auditWhere: Prisma.AuditLogWhereInput = {
       companyId,
-      ...createdAtWhere(from),
+      ...createdAtWhere(window.from, window.to),
     };
 
     const [
@@ -140,8 +178,9 @@ export class AnalyticsService {
     ]);
 
     const mapped = mapAnalyticsOverview({
-      range: query.range,
-      from,
+      range: window.range,
+      from: window.from,
+      to: window.to,
       customerCount,
       conversationStatusGroups: conversationStatuses.map((group) => ({
         value: group.status,

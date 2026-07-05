@@ -8,6 +8,8 @@ import type {
 } from "@prisma/client";
 import type { AnalyticsRange } from "./analytics.validation.js";
 
+type AnalyticsOverviewRange = AnalyticsRange | "custom";
+
 type CountGroup<T extends string> = {
   value: T;
   count: number;
@@ -30,8 +32,9 @@ type RecentAuditLog = AuditLog & {
 };
 
 type AnalyticsOverviewInput = {
-  range: AnalyticsRange;
+  range: AnalyticsOverviewRange;
   from: Date | null;
+  to: Date;
   customerCount: number;
   conversationStatusGroups: CountGroup<ConversationStatus>[];
   ticketStatusGroups: CountGroup<TicketStatus>[];
@@ -100,7 +103,7 @@ export const mapAnalyticsOverview = (input: AnalyticsOverviewInput) => {
     range: input.range,
     period: {
       from: input.from,
-      to: new Date(),
+      to: input.to,
     },
     summary: {
       totalCustomers: input.customerCount,
