@@ -337,7 +337,7 @@ export class TeamService {
     }
     const conversation = await prisma.conversation.findFirst({
       where: { id: conversationId, companyId: user.companyId },
-      include: { customer: true, team: true, messages: { orderBy: { createdAt: "asc" } }, tags: { include: { tag: true } }, activities: { include: { actor: { select: safeUserSelect } }, orderBy: { createdAt: "desc" } } },
+      include: { assignee: { select: safeUserSelect }, customer: true, team: true, messages: { orderBy: { createdAt: "asc" } }, tags: { include: { tag: true } }, activities: { include: { actor: { select: safeUserSelect } }, orderBy: { createdAt: "desc" } } },
     });
     const dto = mapConversation(conversation!);
     if (changed) {

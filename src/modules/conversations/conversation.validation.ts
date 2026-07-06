@@ -37,8 +37,20 @@ export type CreateConversationInput = z.infer<
 >;
 
 export const updateConversationSchema = z.object({
-  status: z.enum(ConversationStatus),
-});
+  status: z.enum(ConversationStatus).optional(),
+  assigneeId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(128)
+    .nullable()
+    .optional(),
+}).refine(
+  (value) => value.status !== undefined || value.assigneeId !== undefined,
+  {
+    message: "At least one update field is required",
+  }
+);
 
 export type UpdateConversationInput = z.infer<
   typeof updateConversationSchema

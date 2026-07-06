@@ -44,6 +44,7 @@ type SafeMessage = Pick<
 // Conversation payload with related entities
 type ConversationWithRelations = Conversation & {
   customer: SafeCustomer;
+  assignee?: SafeUser | null;
   messages?: SafeMessage[];
   attachments?: (Attachment & { uploadedBy?: SafeUser | null })[];
   tags?: (Pick<ConversationTag, "createdAt"> & { tag: SafeTag })[];
@@ -129,6 +130,8 @@ export const mapConversation = (
     channel: conversation.channel,
     status: conversation.status,
     subject: conversation.subject,
+    assigneeId: conversation.assigneeId,
+    assignee: mapUserSummary(conversation.assignee),
     teamId: conversation.teamId,
     team: conversation.team
       ? {

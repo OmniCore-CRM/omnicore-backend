@@ -181,6 +181,7 @@ model User {
   updatedAt DateTime @updatedAt
 
   assignedTickets        Ticket[]               @relation("TicketAssignee")
+  assignedConversations  Conversation[]         @relation("ConversationAssignee")
   createdTickets         Ticket[]               @relation("TicketCreator")
   ticketNotes            TicketNote[]           @relation("TicketNoteAuthor")
   ticketActivities       TicketActivity[]       @relation("TicketActivityActor")
@@ -304,6 +305,9 @@ model Conversation {
   status  ConversationStatus  @default(OPEN)
   subject String?
 
+  assigneeId String?
+  assignee   User?   @relation("ConversationAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
   teamId String?
   team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
 
@@ -319,9 +323,11 @@ model Conversation {
   @@index([companyId])
   @@index([customerId])
   @@index([status])
+  @@index([assigneeId])
   @@index([teamId])
   @@index([companyId, updatedAt, id])
   @@index([companyId, status, updatedAt, id])
+  @@index([companyId, assigneeId, updatedAt, id])
   @@index([companyId, teamId, updatedAt, id])
   @@index([companyId, channel, updatedAt, id])
 }

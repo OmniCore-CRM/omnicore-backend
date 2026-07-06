@@ -62,6 +62,7 @@ const conversationListSelect = {
   channel: true,
   status: true,
   subject: true,
+  assigneeId: true,
   teamId: true,
   createdAt: true,
   updatedAt: true,
@@ -80,6 +81,9 @@ const conversationListSelect = {
       name: true,
       description: true,
     },
+  },
+  assignee: {
+    select: safeUserSelect,
   },
   tags: {
     select: {
@@ -151,6 +155,15 @@ const assertCanMutate = (user: UserContext) => {
   }
 };
 
+const assertCanAssign = (user: UserContext) => {
+  if (!hasPermission(user.role as UserRole, Permissions.assignWork)) {
+    throw new AppError(
+      "Conversation assignment is not allowed",
+      HTTP_STATUS.FORBIDDEN
+    );
+  }
+};
+
 type ConversationListRow = {
   id: string;
   companyId: string;
@@ -158,6 +171,7 @@ type ConversationListRow = {
   channel: ConversationChannel;
   status: ConversationStatus;
   subject: string | null;
+  assigneeId: string | null;
   teamId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -172,6 +186,14 @@ type ConversationListRow = {
     id: string;
     name: string;
     description: string | null;
+  } | null;
+  assignee: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: string;
+    displayName: string;
   } | null;
   tags: Array<{
     id: string;
@@ -221,6 +243,8 @@ const mapConversationListRow = (row: ConversationListRow) => {
     channel: row.channel,
     status: row.status,
     subject: row.subject,
+    assigneeId: row.assigneeId,
+    assignee: row.assignee,
     teamId: row.teamId,
     team: row.team,
     tickets: row.tickets ?? [],
@@ -330,14 +354,13 @@ export class ConversationService {
       (status) => status === normalizedSearch
     );
     const linkedTicketFilter =
-      params.ticketStatus || params.ticketPriority || params.assigneeId
+      params.ticketStatus || params.ticketPriority
         ? {
             companyId,
             ...(params.ticketStatus ? { status: params.ticketStatus } : {}),
             ...(params.ticketPriority
               ? { priority: params.ticketPriority }
               : {}),
-            ...(params.assigneeId ? { assigneeId: params.assigneeId } : {}),
           }
         : null;
 
@@ -347,6 +370,11 @@ export class ConversationService {
       ...(params.status ? { status: params.status } : {}),
       ...(linkedTicketFilter
         ? { tickets: { some: linkedTicketFilter } }
+        : {}),
+      ...(params.assigneeId
+        ? params.assigneeId === "unassigned"
+          ? { assigneeId: null }
+          : { assigneeId: params.assigneeId }
         : {}),
       ...(params.teamId ? { teamId: params.teamId } : {}),
       ...(params.tagId
@@ -437,6 +465,13 @@ export class ConversationService {
       if (params.status) {
         conditions.push(Prisma.sql`c."status" = ${params.status}::"ConversationStatus"`);
       }
+      if (params.assigneeId) {
+        if (params.assigneeId === "unassigned") {
+          conditions.push(Prisma.sql`c."assigneeId" IS NULL`);
+        } else {
+          conditions.push(Prisma.sql`c."assigneeId" = ${params.assigneeId}`);
+        }
+      }
       if (params.teamId) {
         conditions.push(Prisma.sql`c."teamId" = ${params.teamId}`);
       }
@@ -450,6 +485,7 @@ export class ConversationService {
             c."channel",
             c."status",
             c."subject",
+            c."assigneeId",
             c."teamId",
             c."createdAt",
             c."updatedAt"
@@ -465,6 +501,7 @@ export class ConversationService {
           page."channel",
           page."status",
           page."subject",
+          page."assigneeId",
           page."teamId",
           page."createdAt",
           page."updatedAt",
@@ -483,6 +520,17 @@ export class ConversationService {
               'description', team."description"
             )
           END AS "team",
+          CASE
+            WHEN assignee."id" IS NULL THEN NULL
+            ELSE json_build_object(
+              'id', assignee."id",
+              'email', assignee."email",
+              'firstName', assignee."firstName",
+              'lastName', assignee."lastName",
+              'role', assignee."role",
+              'displayName', concat_ws(' ', assignee."firstName", assignee."lastName")
+            )
+          END AS "assignee",
           COALESCE(tags."items", '[]'::json) AS "tags",
           COALESCE(ticket_summary."items", '[]'::json) AS "tickets",
           latest_message."item" AS "latestMessage"
@@ -493,6 +541,9 @@ export class ConversationService {
         LEFT JOIN "Team" team
           ON team."id" = page."teamId"
          AND team."companyId" = ${companyId}
+        LEFT JOIN "User" assignee
+          ON assignee."id" = page."assigneeId"
+         AND assignee."companyId" = ${companyId}
         LEFT JOIN LATERAL (
           SELECT json_agg(
             json_build_object(
@@ -676,6 +727,7 @@ export class ConversationService {
       select: {
         id: true,
         status: true,
+        assigneeId: true,
       },
     });
 
@@ -683,41 +735,59 @@ export class ConversationService {
       throw new AppError("Conversation not found", HTTP_STATUS.NOT_FOUND);
     }
 
-    const statusChanged = existing.status !== data.status;
+    const assigneeId = await this.resolveConversationAssignee(
+      user.companyId,
+      data.assigneeId ?? undefined
+    );
+    const statusChanged =
+      data.status !== undefined && existing.status !== data.status;
+    const assigneeChanged =
+      data.assigneeId !== undefined && existing.assigneeId !== assigneeId;
 
-    if (statusChanged) {
-      await prisma.$transaction([
-        prisma.conversation.update({
+    if (assigneeChanged) {
+      assertCanAssign(user);
+    }
+
+    if (statusChanged || assigneeChanged) {
+      await prisma.$transaction(async (tx) => {
+        await tx.conversation.update({
           where: {
             id: existing.id,
           },
           data: {
-            status: data.status,
+            ...(data.status !== undefined ? { status: data.status } : {}),
+            ...(data.assigneeId !== undefined ? { assigneeId } : {}),
           },
-        }),
-        prisma.conversationActivity.create({
-          data: {
-            companyId: user.companyId,
-            conversationId: existing.id,
-            actorId: user.userId,
-            action: ConversationActivityAction.STATUS_CHANGED,
-            metadata: {
-              from: existing.status,
-              to: data.status,
+        });
+
+        if (statusChanged) {
+          await tx.conversationActivity.create({
+            data: {
+              companyId: user.companyId,
+              conversationId: existing.id,
+              actorId: user.userId,
+              action: ConversationActivityAction.STATUS_CHANGED,
+              metadata: {
+                from: existing.status,
+                to: data.status,
+              },
             },
-          },
-        }),
-      ]);
+          });
+        }
+      });
     }
 
     const conversation = await this.getConversationById(
       user.companyId,
       existing.id
     );
-    if (statusChanged) {
+    if (statusChanged || assigneeChanged) {
       getIO()
         .to(`company:${user.companyId}`)
         .emit("conversation:updated", conversation);
+    }
+
+    if (statusChanged) {
       await AuditLogService.record({
         companyId: user.companyId,
         actorId: user.userId,
@@ -731,7 +801,52 @@ export class ConversationService {
       });
     }
 
+    if (assigneeChanged) {
+      await AuditLogService.record({
+        companyId: user.companyId,
+        actorId: user.userId,
+        action: assigneeId
+          ? "CONVERSATION_ASSIGNED"
+          : "CONVERSATION_UNASSIGNED",
+        entityType: "CONVERSATION",
+        entityId: existing.id,
+        metadata: {
+          from: existing.assigneeId,
+          to: assigneeId,
+        },
+      });
+    }
+
     return conversation;
+  }
+
+  private static async resolveConversationAssignee(
+    companyId: string,
+    assigneeId?: string | null
+  ) {
+    if (assigneeId === undefined) {
+      return undefined;
+    }
+
+    if (assigneeId === null) {
+      return null;
+    }
+
+    const assignee = await prisma.user.findFirst({
+      where: {
+        id: assigneeId,
+        companyId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!assignee) {
+      throw new AppError("Assignee not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return assignee.id;
   }
 
   static async getConversationActivity(
