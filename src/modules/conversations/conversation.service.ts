@@ -448,6 +448,8 @@ export class ConversationService {
         : {}),
     };
 
+      const totalPromise = prisma.conversation.count({ where });
+
     const canUseFastList =
       !search &&
       !linkedTicketFilter &&
@@ -476,7 +478,8 @@ export class ConversationService {
         conditions.push(Prisma.sql`c."teamId" = ${params.teamId}`);
       }
 
-      const rows = await prisma.$queryRaw<ConversationListRow[]>`
+      const [rows, total] = await Promise.all([
+        prisma.$queryRaw<ConversationListRow[]>`
         WITH page AS (
           SELECT
             c."id",
@@ -617,38 +620,44 @@ export class ConversationService {
           LIMIT 1
         ) latest_message ON TRUE
         ORDER BY page."updatedAt" DESC, page."id" DESC
-      `;
+      `,
+        totalPromise,
+      ]);
 
       const page = toPaginatedResult(rows, params.limit);
       return {
         ...page,
+        total,
         items: page.items.map(mapConversationListRow),
       };
     }
 
-    const conversations = await prisma.conversation.findMany({
-      where,
-      select: conversationListSelect,
+    const [conversations, total] = await Promise.all([
+      prisma.conversation.findMany({
+        where,
+        select: conversationListSelect,
 
-      orderBy: [
-        {
-          updatedAt: "desc",
-        },
-        {
-          id: "desc",
-        },
-      ],
+        orderBy: [
+          {
+            updatedAt: "desc",
+          },
+          {
+            id: "desc",
+          },
+        ],
 
-      take: params.limit + 1,
-      ...(params.cursor
-        ? {
-            cursor: {
-              id: params.cursor,
-            },
-            skip: 1,
-          }
-        : {}),
-    });
+        take: params.limit + 1,
+        ...(params.cursor
+          ? {
+              cursor: {
+                id: params.cursor,
+              },
+              skip: 1,
+            }
+          : {}),
+      }),
+      totalPromise,
+    ]);
 
     const page = toPaginatedResult(conversations, params.limit);
     const conversationIds = page.items.map((conversation) => conversation.id);
@@ -683,6 +692,7 @@ export class ConversationService {
 
     return {
       ...page,
+      total,
       items: mapConversations(items),
     };
   }
