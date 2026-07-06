@@ -233,9 +233,28 @@ export class TeamService {
     assertCanManageTeams(user);
     await this.assertTeam(user.companyId, teamId);
     this.clearListCache(user.companyId);
-    await prisma.teamMember.deleteMany({
-      where: { teamId, userId: memberId, companyId: user.companyId },
+    const membership = await prisma.teamMember.findFirst({
+      where: {
+        teamId,
+        userId: memberId,
+        companyId: user.companyId,
+      },
+      select: { teamId: true, userId: true },
     });
+
+    if (!membership) {
+      throw new AppError("Team member not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    await prisma.teamMember.delete({
+      where: {
+        teamId_userId: {
+          teamId,
+          userId: memberId,
+        },
+      },
+    });
+
     await AuditLogService.record({
       companyId: user.companyId,
       actorId: user.userId,
