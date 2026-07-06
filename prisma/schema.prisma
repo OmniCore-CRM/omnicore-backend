@@ -114,6 +114,19 @@ enum AssignmentRuleConditionType {
   TAG
 }
 
+enum NotificationType {
+  TICKET_ASSIGNED
+  CONVERSATION_ASSIGNED
+  TICKET_TEAM_ASSIGNED
+  CONVERSATION_TEAM_ASSIGNED
+  TICKET_MENTION
+  CONVERSATION_MENTION
+  INVITE_ACCEPTED
+  USER_ACTIVATED
+  TEAM_MEMBER_ADDED
+  ROLE_CHANGED
+}
+
 enum EmailProvider {
   RESEND
 }
@@ -160,6 +173,7 @@ model Company {
   whatsAppAccounts       WhatsAppAccount[]
   authSessions           AuthSession[]
   userInviteTokens       UserInviteToken[]
+  notifications          Notification[]
 }
 
 model User {
@@ -194,6 +208,7 @@ model User {
   passwordResetTokens    PasswordResetToken[]
   sentInviteTokens       UserInviteToken[]     @relation("UserInviteActor")
   receivedInviteTokens   UserInviteToken[]     @relation("UserInviteTarget")
+  notifications          Notification[]
 
   @@index([companyId, firstName, lastName])
   @@index([companyId, status, firstName, lastName])
@@ -770,4 +785,30 @@ model AuditLog {
   @@index([companyId, entityType])
   @@index([companyId, actorId])
   @@index([companyId, entityType, entityId])
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type       NotificationType
+  title      String
+  message    String
+  entityType String
+  entityId   String
+  metadata   Json?
+  isRead     Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([companyId, userId, createdAt, id])
+  @@index([companyId, userId, isRead, createdAt, id])
+  @@index([companyId, userId, type, entityType, entityId])
 }

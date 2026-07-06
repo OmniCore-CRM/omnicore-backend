@@ -15,12 +15,14 @@ import { getIO } from "@/socket/socket.server.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { NotificationService } from "@/modules/notifications/notification.service.js";
 import { mapTeam, mapTeams } from "./team.mapper.js";
 import type {
   AssignTeamInput,
   CreateTeamInput,
   UpdateTeamInput,
 } from "./team.validation.js";
+import { NotificationType } from "@prisma/client";
 
 type UserContext = { userId: string; companyId: string; role: string };
 
@@ -226,6 +228,20 @@ export class TeamService {
         memberId,
       },
     });
+
+    await NotificationService.notifySystemEvent({
+      companyId: user.companyId,
+      userId: memberId,
+      type: NotificationType.TEAM_MEMBER_ADDED,
+      title: "Added to team",
+      message: "You were added to a team.",
+      entityType: "TEAM",
+      entityId: teamId,
+      metadata: {
+        route: "/teams",
+      },
+    });
+
     return this.get(user.companyId, teamId);
   }
 
@@ -299,6 +315,23 @@ export class TeamService {
     const dto = mapTicket(ticket!);
     if (changed) {
       getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
+
+      if (data.teamId) {
+        await NotificationService.notifyTeamAssignment({
+          companyId: user.companyId,
+          actorId: user.userId,
+          teamId: data.teamId,
+          type: NotificationType.TICKET_TEAM_ASSIGNED,
+          title: "Team ticket assignment",
+          message: `A ticket was assigned to your team: ${dto.subject}`,
+          entityType: "TICKET",
+          entityId: ticketId,
+          metadata: {
+            route: `/tickets?ticketId=${ticketId}`,
+          },
+        });
+      }
+
       await AuditLogService.record({
         companyId: user.companyId,
         actorId: user.userId,
@@ -342,6 +375,30 @@ export class TeamService {
     const dto = mapConversation(conversation!);
     if (changed) {
       getIO().to(`company:${user.companyId}`).emit("conversation:updated", dto);
+
+      if (data.teamId) {
+        const customerLabel =
+          [dto.customer?.firstName, dto.customer?.lastName]
+            .filter(Boolean)
+            .join(" ") ||
+          dto.customer?.email ||
+          "customer";
+
+        await NotificationService.notifyTeamAssignment({
+          companyId: user.companyId,
+          actorId: user.userId,
+          teamId: data.teamId,
+          type: NotificationType.CONVERSATION_TEAM_ASSIGNED,
+          title: "Team conversation assignment",
+          message: `A conversation with ${customerLabel} was assigned to your team.`,
+          entityType: "CONVERSATION",
+          entityId: conversationId,
+          metadata: {
+            route: `/inbox?c=${conversationId}`,
+          },
+        });
+      }
+
       await AuditLogService.record({
         companyId: user.companyId,
         actorId: user.userId,

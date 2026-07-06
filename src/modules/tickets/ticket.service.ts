@@ -23,6 +23,8 @@ import {
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
+import { NotificationService } from "@/modules/notifications/notification.service.js";
+import { NotificationType } from "@prisma/client";
 import type {
   CreateConversationTicketInput,
   CreateTicketNoteInput,
@@ -413,6 +415,17 @@ export class TicketService {
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_created", dto);
+
+    if (dto.assigneeId) {
+      await NotificationService.notifyTicketAssigned({
+        companyId: user.companyId,
+        actorId: user.userId,
+        assigneeId: dto.assigneeId,
+        ticketId: dto.id,
+        ticketSubject: dto.subject,
+      });
+    }
+
     await AuditLogService.record({
       companyId: user.companyId,
       actorId: user.userId,
@@ -529,6 +542,17 @@ export class TicketService {
 
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_created", dto);
+
+    if (dto.assigneeId) {
+      await NotificationService.notifyTicketAssigned({
+        companyId: user.companyId,
+        actorId: user.userId,
+        assigneeId: dto.assigneeId,
+        ticketId: dto.id,
+        ticketSubject: dto.subject,
+      });
+    }
+
     await AuditLogService.record({
       companyId: user.companyId,
       actorId: user.userId,
@@ -717,6 +741,20 @@ export class TicketService {
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
 
+    if (
+      data.assigneeId !== undefined &&
+      links.assigneeId &&
+      links.assigneeId !== existing.assigneeId
+    ) {
+      await NotificationService.notifyTicketAssigned({
+        companyId: user.companyId,
+        actorId: user.userId,
+        assigneeId: links.assigneeId,
+        ticketId: dto.id,
+        ticketSubject: dto.subject,
+      });
+    }
+
     if (data.status !== undefined && data.status !== existing.status) {
       await AuditLogService.record({
         companyId: user.companyId,
@@ -861,6 +899,21 @@ export class TicketService {
 
     const dto = mapTicketNotes([note])[0];
     getIO().to(`company:${user.companyId}`).emit("ticket_note_added", dto);
+
+    await NotificationService.notifyMentionsFromText(dto.content, {
+      companyId: user.companyId,
+      actorId: user.userId,
+      type: NotificationType.TICKET_MENTION,
+      title: "You were mentioned in a ticket note",
+      message: "A teammate mentioned you in a ticket note.",
+      entityType: "TICKET",
+      entityId: ticketId,
+      metadata: {
+        route: `/tickets?ticketId=${ticketId}`,
+        noteId: dto.id,
+      },
+    });
+
     await AuditLogService.record({
       companyId: user.companyId,
       actorId: user.userId,

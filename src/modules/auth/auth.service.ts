@@ -20,6 +20,8 @@ import {
 } from "./auth.utils.js";
 import { mapAuthResponse } from "./auth.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { NotificationService } from "@/modules/notifications/notification.service.js";
+import { NotificationType } from "@prisma/client";
 
 type UserWithCompany = User & { company: Company };
 type IssuedAuth = {
@@ -581,6 +583,19 @@ export class AuthService {
       entityId: invite.userId,
       metadata: {
         tokenIssuedAt: invite.createdAt.toISOString(),
+      },
+    });
+
+    await NotificationService.notifySystemEvent({
+      companyId: invite.companyId,
+      userId: invite.userId,
+      type: NotificationType.INVITE_ACCEPTED,
+      title: "Invite accepted",
+      message: "Your workspace invite has been accepted.",
+      entityType: "USER",
+      entityId: invite.userId,
+      metadata: {
+        route: "/settings",
       },
     });
 

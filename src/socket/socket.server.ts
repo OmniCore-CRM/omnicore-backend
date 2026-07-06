@@ -177,6 +177,7 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
     if (socketData.authType === "agent") {
       // Agent sockets receive tenant-scoped broadcasts through their company room.
       void socket.join(`company:${companyId}`);
+      void socket.join(`user:${socketData.userId}`);
     }
 
     const socketEventBuckets = new Map<

@@ -9,6 +9,8 @@ import { mapMessage, mapMessages } from "./message.mapper.js";
 import type { PaginationParams } from "@/core/utils/pagination.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
+import { NotificationService } from "@/modules/notifications/notification.service.js";
+import { NotificationType } from "@prisma/client";
 
 const safeUserSelect = {
   id: true,
@@ -118,6 +120,22 @@ export class MessageService {
           })
         );
       }
+    }
+
+    if (data.sender === "AGENT") {
+      await NotificationService.notifyMentionsFromText(data.content, {
+        companyId,
+        actorId: user.userId,
+        type: NotificationType.CONVERSATION_MENTION,
+        title: "You were mentioned in a conversation",
+        message: "A teammate mentioned you in a conversation message.",
+        entityType: "CONVERSATION",
+        entityId: data.conversationId,
+        metadata: {
+          route: `/inbox?c=${data.conversationId}`,
+          messageId: message.id,
+        },
+      });
     }
 
     // Route outbound message through connected provider

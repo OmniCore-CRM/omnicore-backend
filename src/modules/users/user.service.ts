@@ -13,7 +13,9 @@ import {
 } from "@/core/permissions/permission-policy.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { AuthService } from "@/modules/auth/auth.service.js";
+import { NotificationService } from "@/modules/notifications/notification.service.js";
 import { mapUsers } from "./user.mapper.js";
+import { NotificationType } from "@prisma/client";
 import type {
   CreateUserInput,
   UpdateUserInput,
@@ -427,6 +429,21 @@ export class UserService {
             to: updated.role,
           },
         });
+
+        await NotificationService.notifySystemEvent({
+          companyId: input.companyId,
+          userId: updated.id,
+          type: NotificationType.ROLE_CHANGED,
+          title: "Role updated",
+          message: `Your role was changed from ${existing.role} to ${updated.role}.`,
+          entityType: "USER",
+          entityId: updated.id,
+          metadata: {
+            from: existing.role,
+            to: updated.role,
+            route: "/settings",
+          },
+        });
       }
 
       return this.serializeUserWithInvite(updated);
@@ -522,6 +539,21 @@ export class UserService {
           to: updated.status,
         },
       });
+
+      if (updated.status === UserLifecycleStatus.ACTIVE) {
+        await NotificationService.notifySystemEvent({
+          companyId: input.companyId,
+          userId: updated.id,
+          type: NotificationType.USER_ACTIVATED,
+          title: "Account activated",
+          message: "Your account is now active.",
+          entityType: "USER",
+          entityId: updated.id,
+          metadata: {
+            route: "/settings",
+          },
+        });
+      }
     }
 
     return this.serializeUserWithInvite(updated);

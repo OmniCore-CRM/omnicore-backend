@@ -27,6 +27,7 @@ import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { getIO } from "@/socket/socket.server.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
+import { NotificationService } from "@/modules/notifications/notification.service.js";
 
 type UserContext = {
   userId: string;
@@ -795,6 +796,23 @@ export class ConversationService {
       getIO()
         .to(`company:${user.companyId}`)
         .emit("conversation:updated", conversation);
+    }
+
+    if (assigneeChanged && assigneeId) {
+      const customerLabel =
+        [conversation.customer?.firstName, conversation.customer?.lastName]
+          .filter(Boolean)
+          .join(" ") ||
+        conversation.customer?.email ||
+        "customer";
+
+      await NotificationService.notifyConversationAssigned({
+        companyId: user.companyId,
+        actorId: user.userId,
+        assigneeId,
+        conversationId: conversation.id,
+        customerLabel,
+      });
     }
 
     if (statusChanged) {
