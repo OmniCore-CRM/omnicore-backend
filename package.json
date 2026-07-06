@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "start": "npm run start:staging",
     "start:staging": "tsx src/server.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
