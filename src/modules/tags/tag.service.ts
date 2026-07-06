@@ -1,7 +1,11 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { mapTag, mapTags } from "./tag.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
@@ -25,7 +29,7 @@ const viewerMutationError = new AppError(
 );
 
 const assertCanMutate = (user: UserContext) => {
-  if (user.role === "VIEWER") {
+  if (!hasPermission(user.role as UserRole, Permissions.manageTags)) {
     throw viewerMutationError;
   }
 };

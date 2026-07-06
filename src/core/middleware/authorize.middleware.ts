@@ -3,23 +3,16 @@ import { UserRole } from "@prisma/client";
 import { AppError } from "@/core/errors/app-error.js";
 import type { AuthenticatedRequest } from "./auth.middleware.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import {
+  Permissions,
+  rolesWithPermission,
+} from "@/core/permissions/permission-policy.js";
 
 export const RBAC = {
-  admin: [UserRole.OWNER, UserRole.ADMIN],
-  adminAndLead: [UserRole.OWNER, UserRole.ADMIN, UserRole.TEAM_LEAD],
-  operational: [
-    UserRole.OWNER,
-    UserRole.ADMIN,
-    UserRole.TEAM_LEAD,
-    UserRole.AGENT,
-  ],
-  readOnly: [
-    UserRole.OWNER,
-    UserRole.ADMIN,
-    UserRole.TEAM_LEAD,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  ],
+  admin: rolesWithPermission(Permissions.manageSettings),
+  adminAndLead: rolesWithPermission(Permissions.manageTeams),
+  operational: rolesWithPermission(Permissions.operationalConversationActions),
+  readOnly: rolesWithPermission(Permissions.viewAnalytics),
 } as const satisfies Record<string, readonly UserRole[]>;
 
 export const authorize =

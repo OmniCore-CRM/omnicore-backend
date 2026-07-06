@@ -3,11 +3,16 @@ import {
   ConversationChannel,
   ConversationStatus,
   Prisma,
+  UserRole,
   type Message,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import type {
   ConversationListQueryInput,
   CreateConversationInput,
@@ -138,7 +143,7 @@ const conversationDetailSelect = {
 } satisfies Prisma.ConversationSelect;
 
 const assertCanMutate = (user: UserContext) => {
-  if (user.role === "VIEWER") {
+  if (!hasPermission(user.role as UserRole, Permissions.operationalConversationActions)) {
     throw new AppError(
       "Conversation changes are not allowed for viewer users",
       HTTP_STATUS.FORBIDDEN

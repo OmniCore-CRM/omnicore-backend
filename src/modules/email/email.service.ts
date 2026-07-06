@@ -5,12 +5,17 @@ import {
   MessageSender,
   MessageStatus,
   Prisma,
+  UserRole,
 } from "@prisma/client";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/config/db.js";
 import { env } from "@/config/env.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { mapMessage } from "@/modules/messages/message.mapper.js";
@@ -31,11 +36,10 @@ type InboundEmail = {
   content: string;
 };
 
-const managementRoles = new Set(["OWNER", "ADMIN", "TEAM_LEAD"]);
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const assertCanManage = (user: UserContext) => {
-  if (!managementRoles.has(user.role)) {
+  if (!hasPermission(user.role as UserRole, Permissions.manageEmailChannels)) {
     throw new AppError("Email channel changes are not allowed", HTTP_STATUS.FORBIDDEN);
   }
 };

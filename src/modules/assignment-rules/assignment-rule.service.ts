@@ -6,10 +6,15 @@ import {
   Prisma,
   TicketActivityAction,
   TicketPriority,
+  UserRole,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
@@ -34,12 +39,10 @@ type AutomaticAssignmentInput = {
   actorId?: string | null;
 };
 
-const managementRoles = new Set(["OWNER", "ADMIN", "TEAM_LEAD"]);
-
 const assertCanManage = (user: UserContext) => {
-  if (!managementRoles.has(user.role)) {
+  if (!hasPermission(user.role as UserRole, Permissions.manageAssignmentRules)) {
     throw new AppError(
-      "Assignment rule changes require owner, admin, or team lead access",
+      "Assignment rule changes require owner or admin access",
       HTTP_STATUS.FORBIDDEN
     );
   }

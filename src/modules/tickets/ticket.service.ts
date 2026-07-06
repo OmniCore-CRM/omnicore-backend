@@ -2,11 +2,16 @@ import {
   TicketActivityAction,
   TicketPriority,
   TicketStatus,
+  UserRole,
   type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { getIO } from "@/socket/socket.server.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import {
@@ -111,7 +116,7 @@ type UserContext = {
 };
 
 const assertCanMutate = (user: UserContext) => {
-  if (user.role === "VIEWER") {
+  if (!hasPermission(user.role as UserRole, Permissions.operationalTicketActions)) {
     throw viewerMutationError;
   }
 };

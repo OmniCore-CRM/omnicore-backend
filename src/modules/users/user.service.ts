@@ -7,6 +7,10 @@ import {
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { AuthService } from "@/modules/auth/auth.service.js";
 import { mapUsers } from "./user.mapper.js";
@@ -127,7 +131,7 @@ export class UserService {
   }
 
   private static assertCanManageUsers(actorRole: UserRole) {
-    if (actorRole !== UserRole.OWNER && actorRole !== UserRole.ADMIN) {
+    if (!hasPermission(actorRole, Permissions.manageUsers)) {
       throw new AppError(
         "User management is not allowed",
         HTTP_STATUS.FORBIDDEN,

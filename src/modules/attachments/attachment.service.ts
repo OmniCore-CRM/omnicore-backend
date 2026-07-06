@@ -1,10 +1,15 @@
 import {
   AttachmentUploadedFrom,
+  UserRole,
   type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { getIO } from "@/socket/socket.server.js";
 import { mapAttachment } from "./attachment.mapper.js";
 import { attachmentStorage } from "./attachment.storage.js";
@@ -42,7 +47,7 @@ export class AttachmentService {
     file: Express.Multer.File,
     target: TargetInput
   ) {
-    if (user.role === "VIEWER") {
+    if (!hasPermission(user.role as UserRole, Permissions.operationalConversationActions)) {
       throw new AppError(
         "Attachment uploads are not allowed for viewer users",
         HTTP_STATUS.FORBIDDEN

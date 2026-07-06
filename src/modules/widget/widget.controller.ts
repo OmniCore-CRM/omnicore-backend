@@ -9,13 +9,18 @@ import {
   widgetMessagesQuerySchema,
 } from "./widget.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
+import { UserRole } from "@prisma/client";
 
 const getRequestOrigin = (req: Request) =>
   req.get("origin") || req.get("referer");
 
 const assertWidgetAdmin = (req: AuthenticatedRequest) => {
   const role = req.user?.role;
-  if (!["SUPER_ADMIN", "OWNER", "ADMIN"].includes(role ?? "")) {
+  if (!role || !hasPermission(role as UserRole, Permissions.manageWidget)) {
     throw new AppError(
       "Widget settings are restricted to workspace admins",
       HTTP_STATUS.FORBIDDEN

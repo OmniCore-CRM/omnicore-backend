@@ -1,7 +1,11 @@
-import type { Prisma } from "@prisma/client";
+import { UserRole, type Prisma } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import {
   mapSavedReply,
   mapSavedReplies,
@@ -32,7 +36,7 @@ type UserContext = {
 };
 
 const assertCanMutate = (user: UserContext) => {
-  if (user.role === "VIEWER") {
+  if (!hasPermission(user.role as UserRole, Permissions.manageSavedReplies)) {
     throw new AppError(
       "Saved reply changes are not allowed for viewer users",
       HTTP_STATUS.FORBIDDEN

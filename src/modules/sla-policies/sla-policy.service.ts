@@ -1,8 +1,13 @@
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { mapSlaPolicies, mapSlaPolicy } from "./sla-policy.mapper.js";
+import { UserRole } from "@prisma/client";
 import type {
   CreateSlaPolicyInput,
   UpdateSlaPolicyInput,
@@ -14,12 +19,10 @@ type UserContext = {
   role: string;
 };
 
-const allowedRoles = new Set(["OWNER", "ADMIN", "TEAM_LEAD"]);
-
 const assertCanManage = (user: UserContext) => {
-  if (!allowedRoles.has(user.role)) {
+  if (!hasPermission(user.role as UserRole, Permissions.manageSlaPolicies)) {
     throw new AppError(
-      "SLA policy changes require owner, admin, or team lead access",
+      "SLA policy changes require owner or admin access",
       HTTP_STATUS.FORBIDDEN
     );
   }

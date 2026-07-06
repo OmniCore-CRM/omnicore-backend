@@ -1,11 +1,16 @@
 import {
   ConversationActivityAction,
   TicketActivityAction,
+  UserRole,
   type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
+import {
+  Permissions,
+  hasPermission,
+} from "@/core/permissions/permission-policy.js";
 import { getIO } from "@/socket/socket.server.js";
 import { mapConversation } from "@/modules/conversations/conversation.mapper.js";
 import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
@@ -19,14 +24,13 @@ import type {
 
 type UserContext = { userId: string; companyId: string; role: string };
 
-const managementRoles = new Set(["OWNER", "ADMIN", "TEAM_LEAD"]);
 const assertCanManageTeams = (user: UserContext) => {
-  if (!managementRoles.has(user.role)) {
+  if (!hasPermission(user.role as UserRole, Permissions.manageTeams)) {
     throw new AppError("Team management is not allowed", HTTP_STATUS.FORBIDDEN);
   }
 };
 const assertCanAssign = (user: UserContext) => {
-  if (user.role === "VIEWER") {
+  if (!hasPermission(user.role as UserRole, Permissions.assignWork)) {
     throw new AppError("Team assignment is not allowed", HTTP_STATUS.FORBIDDEN);
   }
 };
