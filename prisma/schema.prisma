@@ -412,6 +412,15 @@ model WidgetInstallation {
   enabled        Boolean  @default(true)
   allowedDomains String[]
 
+  // Phase 1: landing page customisation
+  companyDisplayName String?
+  welcomeTitle       String?
+  welcomeSubtitle    String?
+  chatGreeting       String?
+  launcherLabel      String?
+  footerNote         String?
+  messageShortcuts   String[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

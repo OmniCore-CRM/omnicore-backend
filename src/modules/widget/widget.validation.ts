@@ -32,6 +32,17 @@ export const updateWidgetInstallationSchema = z.object({
     .array(domainSchema)
     .max(25, "Too many allowed domains")
     .optional(),
+  // Phase 1: landing page customisation
+  companyDisplayName: z.string().trim().max(120, "Company name is too long").optional(),
+  welcomeTitle: z.string().trim().max(200, "Welcome title is too long").optional(),
+  welcomeSubtitle: z.string().trim().max(400, "Welcome subtitle is too long").optional(),
+  chatGreeting: z.string().trim().max(200, "Chat greeting is too long").optional(),
+  launcherLabel: z.string().trim().max(60, "Launcher label is too long").optional(),
+  footerNote: z.string().trim().max(400, "Footer note is too long").optional(),
+  messageShortcuts: z
+    .array(z.string().trim().min(1).max(120))
+    .max(6, "Too many shortcuts")
+    .optional(),
 });
 
 // ===== Create widget conversation =====

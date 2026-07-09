@@ -178,6 +178,28 @@ export class WidgetService {
               ),
             }
           : {}),
+        // Phase 1: landing page customisation — empty string normalised to null
+        ...(typeof data.companyDisplayName === "string"
+          ? { companyDisplayName: data.companyDisplayName || null }
+          : {}),
+        ...(typeof data.welcomeTitle === "string"
+          ? { welcomeTitle: data.welcomeTitle || null }
+          : {}),
+        ...(typeof data.welcomeSubtitle === "string"
+          ? { welcomeSubtitle: data.welcomeSubtitle || null }
+          : {}),
+        ...(typeof data.chatGreeting === "string"
+          ? { chatGreeting: data.chatGreeting || null }
+          : {}),
+        ...(typeof data.launcherLabel === "string"
+          ? { launcherLabel: data.launcherLabel || null }
+          : {}),
+        ...(typeof data.footerNote === "string"
+          ? { footerNote: data.footerNote || null }
+          : {}),
+        ...(data.messageShortcuts !== undefined
+          ? { messageShortcuts: data.messageShortcuts }
+          : {}),
       },
     });
 

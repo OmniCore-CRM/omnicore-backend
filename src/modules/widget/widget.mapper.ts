@@ -15,6 +15,13 @@ export const mapWidgetInstallation = (
   publicKey: installation.publicKey,
   enabled: installation.enabled,
   allowedDomains: installation.allowedDomains,
+  companyDisplayName: installation.companyDisplayName,
+  welcomeTitle: installation.welcomeTitle,
+  welcomeSubtitle: installation.welcomeSubtitle,
+  chatGreeting: installation.chatGreeting,
+  launcherLabel: installation.launcherLabel,
+  footerNote: installation.footerNote,
+  messageShortcuts: installation.messageShortcuts,
   createdAt: installation.createdAt,
   updatedAt: installation.updatedAt,
 });
@@ -28,6 +35,13 @@ export const mapWidgetBootstrap = (
 ) => ({
   publicKey: installation.publicKey,
   enabled: installation.enabled,
+  companyDisplayName: installation.companyDisplayName,
+  welcomeTitle: installation.welcomeTitle,
+  welcomeSubtitle: installation.welcomeSubtitle,
+  chatGreeting: installation.chatGreeting,
+  launcherLabel: installation.launcherLabel,
+  footerNote: installation.footerNote,
+  messageShortcuts: installation.messageShortcuts,
 });
 
 export const mapPublicWidgetCustomer = (customer: Customer) => ({
