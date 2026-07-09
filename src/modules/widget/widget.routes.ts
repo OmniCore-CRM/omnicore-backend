@@ -6,6 +6,8 @@ import {
   createWidgetInstallationSchema,
   createWidgetMessageSchema,
   updateWidgetInstallationSchema,
+  createWidgetFaqEntrySchema,
+  updateWidgetFaqEntrySchema,
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
@@ -139,6 +141,37 @@ router.post(
   widgetMessageRateLimit,
   validateRequest(createWidgetMessageSchema),
   WidgetController.createWidgetMessage
+);
+
+// ===== FAQ management (admin) =====
+router.get(
+  "/installations/:id/faq",
+  protect,
+  authorize(...RBAC.admin),
+  WidgetController.listFaqEntries
+);
+
+router.post(
+  "/installations/:id/faq",
+  protect,
+  authorize(...RBAC.admin),
+  validateRequest(createWidgetFaqEntrySchema),
+  WidgetController.createFaqEntry
+);
+
+router.patch(
+  "/installations/:id/faq/:faqId",
+  protect,
+  authorize(...RBAC.admin),
+  validateRequest(updateWidgetFaqEntrySchema),
+  WidgetController.updateFaqEntry
+);
+
+router.delete(
+  "/installations/:id/faq/:faqId",
+  protect,
+  authorize(...RBAC.admin),
+  WidgetController.deleteFaqEntry
 );
 
 export default router;

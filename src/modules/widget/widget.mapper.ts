@@ -3,6 +3,7 @@ import type {
   Customer,
   Message,
   WidgetInstallation,
+  WidgetFaqEntry,
   Attachment,
   User,
 } from "@prisma/client";
@@ -31,7 +32,8 @@ export const mapWidgetInstallations = (
 ) => installations.map(mapWidgetInstallation);
 
 export const mapWidgetBootstrap = (
-  installation: WidgetInstallation
+  installation: WidgetInstallation,
+  faqEntries: WidgetFaqEntry[] = []
 ) => ({
   publicKey: installation.publicKey,
   enabled: installation.enabled,
@@ -42,7 +44,27 @@ export const mapWidgetBootstrap = (
   launcherLabel: installation.launcherLabel,
   footerNote: installation.footerNote,
   messageShortcuts: installation.messageShortcuts,
+  faqEntries: faqEntries.map((e) => ({
+    id: e.id,
+    question: e.question,
+    answer: e.answer,
+    sortOrder: e.sortOrder,
+  })),
 });
+
+export const mapWidgetFaqEntry = (entry: WidgetFaqEntry) => ({
+  id: entry.id,
+  widgetInstallationId: entry.widgetInstallationId,
+  companyId: entry.companyId,
+  question: entry.question,
+  answer: entry.answer,
+  sortOrder: entry.sortOrder,
+  createdAt: entry.createdAt,
+  updatedAt: entry.updatedAt,
+});
+
+export const mapWidgetFaqEntries = (entries: WidgetFaqEntry[]) =>
+  entries.map(mapWidgetFaqEntry);
 
 export const mapPublicWidgetCustomer = (customer: Customer) => ({
   id: customer.id,

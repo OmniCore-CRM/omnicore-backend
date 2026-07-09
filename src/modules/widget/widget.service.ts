@@ -16,11 +16,15 @@ import type {
   CreateWidgetMessageInput,
   UpdateWidgetInstallationInput,
   WidgetMessagesQueryInput,
+  CreateWidgetFaqEntryInput,
+  UpdateWidgetFaqEntryInput,
 } from "./widget.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import {
   mapWidgetBootstrap,
+  mapWidgetFaqEntries,
+  mapWidgetFaqEntry,
   mapWidgetInstallation,
   mapWidgetInstallations,
   mapPublicWidgetConversation,
@@ -224,7 +228,12 @@ export class WidgetService {
       requestOrigin
     );
 
-    return mapWidgetBootstrap(installation);
+    const faqEntries = await prisma.widgetFaqEntry.findMany({
+      where: { widgetInstallationId: installation.id, companyId: installation.companyId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+
+    return mapWidgetBootstrap(installation, faqEntries);
   }
 
   static async authorizeConversationSession(
@@ -792,5 +801,90 @@ export class WidgetService {
       ticket: createdTicket,
       created: true,
     };
+  }
+
+  // ===== FAQ management (admin) =====
+
+  static async listFaqEntries(companyId: string, installationId: string) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+    const entries = await prisma.widgetFaqEntry.findMany({
+      where: { widgetInstallationId: installationId, companyId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+    return mapWidgetFaqEntries(entries);
+  }
+
+  static async createFaqEntry(
+    companyId: string,
+    installationId: string,
+    data: CreateWidgetFaqEntryInput
+  ) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+    const entry = await prisma.widgetFaqEntry.create({
+      data: {
+        widgetInstallationId: installationId,
+        companyId,
+        question: data.question,
+        answer: data.answer,
+        sortOrder: data.sortOrder ?? 0,
+      },
+    });
+    return mapWidgetFaqEntry(entry);
+  }
+
+  static async updateFaqEntry(
+    companyId: string,
+    installationId: string,
+    faqId: string,
+    data: UpdateWidgetFaqEntryInput
+  ) {
+    await this.resolveOwnedFaqEntry(companyId, installationId, faqId);
+    const updated = await prisma.widgetFaqEntry.update({
+      where: { id: faqId },
+      data: {
+        ...(typeof data.question === "string" ? { question: data.question } : {}),
+        ...(typeof data.answer === "string" ? { answer: data.answer } : {}),
+        ...(typeof data.sortOrder === "number" ? { sortOrder: data.sortOrder } : {}),
+      },
+    });
+    return mapWidgetFaqEntry(updated);
+  }
+
+  static async deleteFaqEntry(
+    companyId: string,
+    installationId: string,
+    faqId: string
+  ) {
+    await this.resolveOwnedFaqEntry(companyId, installationId, faqId);
+    await prisma.widgetFaqEntry.delete({ where: { id: faqId } });
+  }
+
+  // ===== Private helpers =====
+
+  private static async resolveOwnedInstallation(
+    companyId: string,
+    installationId: string
+  ) {
+    const installation = await prisma.widgetInstallation.findFirst({
+      where: { id: installationId, companyId },
+    });
+    if (!installation) {
+      throw new AppError("Widget installation not found", HTTP_STATUS.NOT_FOUND);
+    }
+    return installation;
+  }
+
+  private static async resolveOwnedFaqEntry(
+    companyId: string,
+    installationId: string,
+    faqId: string
+  ) {
+    const entry = await prisma.widgetFaqEntry.findFirst({
+      where: { id: faqId, widgetInstallationId: installationId, companyId },
+    });
+    if (!entry) {
+      throw new AppError("FAQ entry not found", HTTP_STATUS.NOT_FOUND);
+    }
+    return entry;
   }
 }

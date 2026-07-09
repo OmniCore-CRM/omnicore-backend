@@ -154,6 +154,7 @@ model Company {
   conversations          Conversation[]
   messages               Message[]
   widgetInstallations    WidgetInstallation[]
+  widgetFaqEntries       WidgetFaqEntry[]
   tickets                Ticket[]
   ticketNotes            TicketNote[]
   ticketActivities       TicketActivity[]
@@ -421,9 +422,31 @@ model WidgetInstallation {
   footerNote         String?
   messageShortcuts   String[]
 
+  faqEntries WidgetFaqEntry[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([companyId])
+}
+
+model WidgetFaqEntry {
+  id String @id @default(cuid())
+
+  widgetInstallationId String
+  widgetInstallation   WidgetInstallation @relation(fields: [widgetInstallationId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  question  String
+  answer    String
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([widgetInstallationId])
   @@index([companyId])
 }
 

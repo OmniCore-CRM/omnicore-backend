@@ -112,3 +112,42 @@ export type CreateWidgetMessageInput = z.infer<
 export type WidgetMessagesQueryInput = z.infer<
   typeof widgetMessagesQuerySchema
 >;
+
+// ===== FAQ management (admin) =====
+export const createWidgetFaqEntrySchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1, "Question is required")
+    .max(300, "Question is too long"),
+  answer: z
+    .string()
+    .trim()
+    .min(1, "Answer is required")
+    .max(1000, "Answer is too long"),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+});
+
+export const updateWidgetFaqEntrySchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(1, "Question is required")
+    .max(300, "Question is too long")
+    .optional(),
+  answer: z
+    .string()
+    .trim()
+    .min(1, "Answer is required")
+    .max(1000, "Answer is too long")
+    .optional(),
+  sortOrder: z.number().int().min(0).max(9999).optional(),
+});
+
+export type CreateWidgetFaqEntryInput = z.infer<
+  typeof createWidgetFaqEntrySchema
+>;
+
+export type UpdateWidgetFaqEntryInput = z.infer<
+  typeof updateWidgetFaqEntrySchema
+>;

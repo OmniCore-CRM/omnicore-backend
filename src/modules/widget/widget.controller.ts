@@ -7,8 +7,7 @@ import { WidgetService } from "./widget.service.js";
 import {
   widgetBootstrapQuerySchema,
   widgetMessagesQuerySchema,
-} from "./widget.validation.js";
-import { AppError } from "@/core/errors/app-error.js";
+} from "./widget.validation.js";import { AppError } from "@/core/errors/app-error.js";
 import {
   Permissions,
   hasPermission,
@@ -155,6 +154,76 @@ export class WidgetController {
         statusCode: HTTP_STATUS.CREATED,
         message: "Widget message created successfully",
         data: message,
+      });
+    }
+  );
+
+  // ===== FAQ management (admin) =====
+
+  static listFaqEntries = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      const entries = await WidgetService.listFaqEntries(
+        req.user!.companyId,
+        req.params.id as string
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "FAQ entries retrieved successfully",
+        data: entries,
+      });
+    }
+  );
+
+  static createFaqEntry = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      const entry = await WidgetService.createFaqEntry(
+        req.user!.companyId,
+        req.params.id as string,
+        req.body
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.CREATED,
+        message: "FAQ entry created successfully",
+        data: entry,
+      });
+    }
+  );
+
+  static updateFaqEntry = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      const entry = await WidgetService.updateFaqEntry(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.faqId as string,
+        req.body
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "FAQ entry updated successfully",
+        data: entry,
+      });
+    }
+  );
+
+  static deleteFaqEntry = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      await WidgetService.deleteFaqEntry(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.faqId as string
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "FAQ entry deleted successfully",
+        data: null,
       });
     }
   );
