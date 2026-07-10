@@ -141,6 +141,12 @@ enum ProviderAccountStatus {
   DISABLED
 }
 
+enum WidgetArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 model Company {
   id       String  @id @default(cuid())
   name     String
@@ -149,32 +155,34 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users                  User[]
-  customers              Customer[]
-  conversations          Conversation[]
-  messages               Message[]
-  widgetInstallations    WidgetInstallation[]
-  widgetFaqEntries       WidgetFaqEntry[]
-  tickets                Ticket[]
-  ticketNotes            TicketNote[]
-  ticketActivities       TicketActivity[]
-  conversationActivities ConversationActivity[]
-  savedReplies           SavedReply[]
-  tags                   Tag[]
-  customerTags           CustomerTag[]
-  conversationTags       ConversationTag[]
-  ticketTags             TicketTag[]
-  teams                  Team[]
-  teamMembers            TeamMember[]
-  attachments            Attachment[]
-  auditLogs              AuditLog[]
-  slaPolicies            SlaPolicy[]
-  assignmentRules        AssignmentRule[]
-  emailAccounts          EmailAccount[]
-  whatsAppAccounts       WhatsAppAccount[]
-  authSessions           AuthSession[]
-  userInviteTokens       UserInviteToken[]
-  notifications          Notification[]
+  users                   User[]
+  customers               Customer[]
+  conversations           Conversation[]
+  messages                Message[]
+  widgetInstallations     WidgetInstallation[]
+  widgetFaqEntries        WidgetFaqEntry[]
+  widgetArticleCategories WidgetArticleCategory[]
+  widgetArticles          WidgetArticle[]
+  tickets                 Ticket[]
+  ticketNotes             TicketNote[]
+  ticketActivities        TicketActivity[]
+  conversationActivities  ConversationActivity[]
+  savedReplies            SavedReply[]
+  tags                    Tag[]
+  customerTags            CustomerTag[]
+  conversationTags        ConversationTag[]
+  ticketTags              TicketTag[]
+  teams                   Team[]
+  teamMembers             TeamMember[]
+  attachments             Attachment[]
+  auditLogs               AuditLog[]
+  slaPolicies             SlaPolicy[]
+  assignmentRules         AssignmentRule[]
+  emailAccounts           EmailAccount[]
+  whatsAppAccounts        WhatsAppAccount[]
+  authSessions            AuthSession[]
+  userInviteTokens        UserInviteToken[]
+  notifications           Notification[]
 }
 
 model User {
@@ -185,8 +193,8 @@ model User {
   firstName String
   lastName  String
 
-  role     UserRole @default(AGENT)
-  isActive Boolean  @default(true)
+  role     UserRole            @default(AGENT)
+  isActive Boolean             @default(true)
   status   UserLifecycleStatus @default(ACTIVE)
 
   companyId String
@@ -202,13 +210,14 @@ model User {
   ticketActivities       TicketActivity[]       @relation("TicketActivityActor")
   conversationActivities ConversationActivity[] @relation("ConversationActivityActor")
   savedReplies           SavedReply[]           @relation("SavedReplyCreator")
+  widgetArticles         WidgetArticle[]        @relation("WidgetArticleCreator")
   teamMemberships        TeamMember[]
   attachments            Attachment[]           @relation("AttachmentUploader")
   auditLogs              AuditLog[]             @relation("AuditLogActor")
   authSessions           AuthSession[]
   passwordResetTokens    PasswordResetToken[]
-  sentInviteTokens       UserInviteToken[]     @relation("UserInviteActor")
-  receivedInviteTokens   UserInviteToken[]     @relation("UserInviteTarget")
+  sentInviteTokens       UserInviteToken[]      @relation("UserInviteActor")
+  receivedInviteTokens   UserInviteToken[]      @relation("UserInviteTarget")
   notifications          Notification[]
 
   @@index([companyId, firstName, lastName])
@@ -249,10 +258,10 @@ model PasswordResetToken {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  tokenHash  String   @unique
+  tokenHash  String    @unique
   expiresAt  DateTime
   consumedAt DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -268,7 +277,7 @@ model AuthSession {
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  tokenHash String @unique
+  tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
 
@@ -358,7 +367,7 @@ model ConversationActivity {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   actorId String?
-  actor   User?  @relation("ConversationActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor   User?   @relation("ConversationActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   action   ConversationActivityAction
   metadata Json?
@@ -427,7 +436,9 @@ model WidgetInstallation {
   heroImageUrl String?
   brandColor   String?
 
-  faqEntries WidgetFaqEntry[]
+  faqEntries        WidgetFaqEntry[]
+  articleCategories WidgetArticleCategory[]
+  articles          WidgetArticle[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -453,6 +464,58 @@ model WidgetFaqEntry {
 
   @@index([widgetInstallationId])
   @@index([companyId])
+}
+
+model WidgetArticleCategory {
+  id                   String @id @default(cuid())
+  companyId            String
+  widgetInstallationId String
+  name                 String
+  slug                 String
+  sortOrder            Int    @default(0)
+
+  company            Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  widgetInstallation WidgetInstallation @relation(fields: [widgetInstallationId], references: [id], onDelete: Cascade)
+  articles           WidgetArticle[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([widgetInstallationId, slug])
+  @@index([companyId])
+  @@index([widgetInstallationId])
+  @@index([companyId, widgetInstallationId])
+}
+
+model WidgetArticle {
+  id                   String              @id @default(cuid())
+  companyId            String
+  widgetInstallationId String
+  title                String
+  slug                 String
+  summary              String
+  content              String
+  categoryId           String?
+  status               WidgetArticleStatus @default(DRAFT)
+  sortOrder            Int                 @default(0)
+  publishedAt          DateTime?
+  createdById          String?
+
+  company            Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  widgetInstallation WidgetInstallation     @relation(fields: [widgetInstallationId], references: [id], onDelete: Cascade)
+  category           WidgetArticleCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  createdBy          User?                  @relation("WidgetArticleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([widgetInstallationId, slug])
+  @@index([companyId])
+  @@index([widgetInstallationId])
+  @@index([companyId, widgetInstallationId])
+  @@index([widgetInstallationId, status])
+  @@index([categoryId])
+  @@index([createdById])
 }
 
 model WhatsAppAccount {
@@ -617,9 +680,9 @@ model Team {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members       TeamMember[]
-  tickets       Ticket[]
-  conversations Conversation[]
+  members         TeamMember[]
+  tickets         Ticket[]
+  conversations   Conversation[]
   assignmentRules AssignmentRule[]
 
   @@unique([companyId, name])
@@ -649,10 +712,10 @@ model AssignmentRule {
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  name          String
-  enabled       Boolean                     @default(true)
-  targetType    AssignmentRuleTargetType
-  conditionType AssignmentRuleConditionType
+  name           String
+  enabled        Boolean                     @default(true)
+  targetType     AssignmentRuleTargetType
+  conditionType  AssignmentRuleConditionType
   conditionValue String
 
   teamId String
@@ -697,7 +760,7 @@ model TicketActivity {
   ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   actorId String?
-  actor   User?  @relation("TicketActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor   User?   @relation("TicketActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   action   TicketActivityAction
   metadata Json?
@@ -839,7 +902,7 @@ model Notification {
   entityType String
   entityId   String
   metadata   Json?
-  isRead     Boolean @default(false)
+  isRead     Boolean          @default(false)
 
   createdAt DateTime @default(now())
 

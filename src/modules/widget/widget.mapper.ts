@@ -4,6 +4,8 @@ import type {
   Message,
   WidgetInstallation,
   WidgetFaqEntry,
+  WidgetArticle,
+  WidgetArticleCategory,
   Attachment,
   User,
 } from "@prisma/client";
@@ -71,6 +73,61 @@ export const mapWidgetFaqEntry = (entry: WidgetFaqEntry) => ({
 
 export const mapWidgetFaqEntries = (entries: WidgetFaqEntry[]) =>
   entries.map(mapWidgetFaqEntry);
+
+type WidgetArticleCreator = Pick<
+  User,
+  "id" | "email" | "firstName" | "lastName" | "role"
+>;
+
+type WidgetArticleWithRelations = WidgetArticle & {
+  category?: WidgetArticleCategory | null;
+  createdBy?: WidgetArticleCreator | null;
+};
+
+export const mapWidgetArticleCategory = (category: WidgetArticleCategory) => ({
+  id: category.id,
+  companyId: category.companyId,
+  widgetInstallationId: category.widgetInstallationId,
+  name: category.name,
+  slug: category.slug,
+  sortOrder: category.sortOrder,
+  createdAt: category.createdAt,
+  updatedAt: category.updatedAt,
+});
+
+export const mapWidgetArticleCategories = (
+  categories: WidgetArticleCategory[]
+) => categories.map(mapWidgetArticleCategory);
+
+export const mapWidgetArticle = (article: WidgetArticleWithRelations) => ({
+  id: article.id,
+  companyId: article.companyId,
+  widgetInstallationId: article.widgetInstallationId,
+  title: article.title,
+  slug: article.slug,
+  summary: article.summary,
+  content: article.content,
+  categoryId: article.categoryId,
+  status: article.status,
+  sortOrder: article.sortOrder,
+  publishedAt: article.publishedAt,
+  createdById: article.createdById,
+  category: article.category ? mapWidgetArticleCategory(article.category) : null,
+  createdBy: article.createdBy
+    ? {
+        id: article.createdBy.id,
+        email: article.createdBy.email,
+        firstName: article.createdBy.firstName,
+        lastName: article.createdBy.lastName,
+        role: article.createdBy.role,
+      }
+    : null,
+  createdAt: article.createdAt,
+  updatedAt: article.updatedAt,
+});
+
+export const mapWidgetArticles = (articles: WidgetArticleWithRelations[]) =>
+  articles.map(mapWidgetArticle);
 
 export const mapPublicWidgetCustomer = (customer: Customer) => ({
   id: customer.id,

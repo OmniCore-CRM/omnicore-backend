@@ -7,6 +7,7 @@ import {
   TicketPriority,
   TicketStatus,
   UserRole,
+  WidgetArticleStatus,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { getIO } from "@/socket/socket.server.js";
@@ -18,11 +19,20 @@ import type {
   WidgetMessagesQueryInput,
   CreateWidgetFaqEntryInput,
   UpdateWidgetFaqEntryInput,
+  CreateWidgetArticleCategoryInput,
+  UpdateWidgetArticleCategoryInput,
+  CreateWidgetArticleInput,
+  UpdateWidgetArticleInput,
+  UpdateWidgetArticleStatusInput,
 } from "./widget.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import {
   mapWidgetBootstrap,
+  mapWidgetArticle,
+  mapWidgetArticleCategory,
+  mapWidgetArticleCategories,
+  mapWidgetArticles,
   mapWidgetFaqEntries,
   mapWidgetFaqEntry,
   mapWidgetInstallation,
@@ -52,6 +62,23 @@ const safeUserSelect = {
   lastName: true,
   role: true,
 } satisfies Prisma.UserSelect;
+
+const widgetArticleInclude = {
+  category: true,
+  createdBy: {
+    select: safeUserSelect,
+  },
+} satisfies Prisma.WidgetArticleInclude;
+
+type WidgetArticleCategoryWithCount = Prisma.WidgetArticleCategoryGetPayload<{
+  include: {
+    _count: {
+      select: {
+        articles: true;
+      };
+    };
+  };
+}>;
 
 type RequestOrigin = string | undefined;
 
@@ -865,6 +892,306 @@ export class WidgetService {
     await prisma.widgetFaqEntry.delete({ where: { id: faqId } });
   }
 
+  // ===== Knowledge base management (admin) =====
+
+  static async listArticleCategories(companyId: string, installationId: string) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+
+    const categories = await prisma.widgetArticleCategory.findMany({
+      where: {
+        companyId,
+        widgetInstallationId: installationId,
+      },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+
+    return mapWidgetArticleCategories(categories);
+  }
+
+  static async createArticleCategory(
+    companyId: string,
+    installationId: string,
+    data: CreateWidgetArticleCategoryInput,
+    actorId?: string
+  ) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+
+    try {
+      const category = await prisma.widgetArticleCategory.create({
+        data: {
+          companyId,
+          widgetInstallationId: installationId,
+          name: data.name,
+          slug: data.slug,
+          sortOrder: data.sortOrder ?? 0,
+        },
+      });
+
+      await AuditLogService.record({
+        companyId,
+        actorId: actorId ?? null,
+        action: "WIDGET_ARTICLE_CATEGORY_CREATED",
+        entityType: "WIDGET_ARTICLE_CATEGORY",
+        entityId: category.id,
+        metadata: {
+          widgetInstallationId: installationId,
+          name: category.name,
+          slug: category.slug,
+        },
+      });
+
+      return mapWidgetArticleCategory(category);
+    } catch (error) {
+      this.throwIfDuplicateSlug(error, "A category with this slug already exists for this widget");
+      throw error;
+    }
+  }
+
+  static async updateArticleCategory(
+    companyId: string,
+    installationId: string,
+    categoryId: string,
+    data: UpdateWidgetArticleCategoryInput,
+    actorId?: string
+  ) {
+    await this.resolveOwnedArticleCategory(companyId, installationId, categoryId);
+
+    try {
+      const category = await prisma.widgetArticleCategory.update({
+        where: { id: categoryId },
+        data: {
+          ...(typeof data.name === "string" ? { name: data.name } : {}),
+          ...(typeof data.slug === "string" ? { slug: data.slug } : {}),
+          ...(typeof data.sortOrder === "number" ? { sortOrder: data.sortOrder } : {}),
+        },
+      });
+
+      await AuditLogService.record({
+        companyId,
+        actorId: actorId ?? null,
+        action: "WIDGET_ARTICLE_CATEGORY_UPDATED",
+        entityType: "WIDGET_ARTICLE_CATEGORY",
+        entityId: category.id,
+        metadata: {
+          widgetInstallationId: installationId,
+          name: category.name,
+          slug: category.slug,
+        },
+      });
+
+      return mapWidgetArticleCategory(category);
+    } catch (error) {
+      this.throwIfDuplicateSlug(error, "A category with this slug already exists for this widget");
+      throw error;
+    }
+  }
+
+  static async deleteArticleCategory(
+    companyId: string,
+    installationId: string,
+    categoryId: string,
+    actorId?: string
+  ) {
+    const category = (await this.resolveOwnedArticleCategory(
+      companyId,
+      installationId,
+      categoryId,
+      true
+    )) as WidgetArticleCategoryWithCount;
+
+    if (category._count.articles > 0) {
+      throw new AppError(
+        "Cannot delete category with assigned articles. Unassign or archive them first.",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    await prisma.widgetArticleCategory.delete({ where: { id: categoryId } });
+
+    await AuditLogService.record({
+      companyId,
+      actorId: actorId ?? null,
+      action: "WIDGET_ARTICLE_CATEGORY_DELETED",
+      entityType: "WIDGET_ARTICLE_CATEGORY",
+      entityId: categoryId,
+      metadata: {
+        widgetInstallationId: installationId,
+        name: category.name,
+        slug: category.slug,
+      },
+    });
+  }
+
+  static async listArticles(companyId: string, installationId: string) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+
+    const articles = await prisma.widgetArticle.findMany({
+      where: {
+        companyId,
+        widgetInstallationId: installationId,
+      },
+      include: widgetArticleInclude,
+      orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
+    });
+
+    return mapWidgetArticles(articles);
+  }
+
+  static async getArticle(companyId: string, installationId: string, articleId: string) {
+    const article = await this.resolveOwnedArticle(companyId, installationId, articleId, true);
+    return mapWidgetArticle(article as Prisma.WidgetArticleGetPayload<{ include: typeof widgetArticleInclude }>);
+  }
+
+  static async createArticle(
+    companyId: string,
+    installationId: string,
+    data: CreateWidgetArticleInput,
+    actorId?: string
+  ) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+    await this.assertValidCategory(companyId, installationId, data.categoryId ?? null);
+
+    try {
+      const article = await prisma.widgetArticle.create({
+        data: {
+          companyId,
+          widgetInstallationId: installationId,
+          title: data.title,
+          slug: data.slug,
+          summary: data.summary,
+          content: data.content,
+          categoryId: data.categoryId ?? null,
+          sortOrder: data.sortOrder ?? 0,
+          createdById: actorId ?? null,
+        },
+        include: widgetArticleInclude,
+      });
+
+      await AuditLogService.record({
+        companyId,
+        actorId: actorId ?? null,
+        action: "WIDGET_ARTICLE_CREATED",
+        entityType: "WIDGET_ARTICLE",
+        entityId: article.id,
+        metadata: {
+          widgetInstallationId: installationId,
+          title: article.title,
+          slug: article.slug,
+          status: article.status,
+        },
+      });
+
+      return mapWidgetArticle(article);
+    } catch (error) {
+      this.throwIfDuplicateSlug(error, "An article with this slug already exists for this widget");
+      throw error;
+    }
+  }
+
+  static async updateArticle(
+    companyId: string,
+    installationId: string,
+    articleId: string,
+    data: UpdateWidgetArticleInput,
+    actorId?: string
+  ) {
+    await this.resolveOwnedArticle(companyId, installationId, articleId);
+    await this.assertValidCategory(
+      companyId,
+      installationId,
+      Object.prototype.hasOwnProperty.call(data, "categoryId")
+        ? (data.categoryId ?? null)
+        : undefined
+    );
+
+    try {
+      const article = await prisma.widgetArticle.update({
+        where: { id: articleId },
+        data: {
+          ...(typeof data.title === "string" ? { title: data.title } : {}),
+          ...(typeof data.slug === "string" ? { slug: data.slug } : {}),
+          ...(typeof data.summary === "string" ? { summary: data.summary } : {}),
+          ...(typeof data.content === "string" ? { content: data.content } : {}),
+          ...(typeof data.sortOrder === "number" ? { sortOrder: data.sortOrder } : {}),
+          ...(Object.prototype.hasOwnProperty.call(data, "categoryId")
+            ? { categoryId: data.categoryId ?? null }
+            : {}),
+        },
+        include: widgetArticleInclude,
+      });
+
+      await AuditLogService.record({
+        companyId,
+        actorId: actorId ?? null,
+        action: "WIDGET_ARTICLE_UPDATED",
+        entityType: "WIDGET_ARTICLE",
+        entityId: article.id,
+        metadata: {
+          widgetInstallationId: installationId,
+          title: article.title,
+          slug: article.slug,
+          status: article.status,
+        },
+      });
+
+      return mapWidgetArticle(article);
+    } catch (error) {
+      this.throwIfDuplicateSlug(error, "An article with this slug already exists for this widget");
+      throw error;
+    }
+  }
+
+  static async updateArticleStatus(
+    companyId: string,
+    installationId: string,
+    articleId: string,
+    data: UpdateWidgetArticleStatusInput,
+    actorId?: string
+  ) {
+    const existing = await this.resolveOwnedArticle(companyId, installationId, articleId);
+
+    const nextStatus = data.status as WidgetArticleStatus;
+    const currentStatus = existing.status;
+
+    const isLegalTransition =
+      (currentStatus === WidgetArticleStatus.DRAFT && nextStatus === WidgetArticleStatus.PUBLISHED) ||
+      (currentStatus === WidgetArticleStatus.PUBLISHED && nextStatus === WidgetArticleStatus.ARCHIVED) ||
+      (currentStatus === WidgetArticleStatus.ARCHIVED && nextStatus === WidgetArticleStatus.PUBLISHED);
+
+    if (!isLegalTransition) {
+      throw new AppError("Illegal article status transition", HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const article = await prisma.widgetArticle.update({
+      where: { id: articleId },
+      data: {
+        status: nextStatus,
+        ...(nextStatus === WidgetArticleStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
+      },
+      include: widgetArticleInclude,
+    });
+
+    await AuditLogService.record({
+      companyId,
+      actorId: actorId ?? null,
+      action:
+        nextStatus === WidgetArticleStatus.PUBLISHED
+          ? "WIDGET_ARTICLE_PUBLISHED"
+          : "WIDGET_ARTICLE_ARCHIVED",
+      entityType: "WIDGET_ARTICLE",
+      entityId: article.id,
+      metadata: {
+        widgetInstallationId: installationId,
+        title: article.title,
+        slug: article.slug,
+        previousStatus: currentStatus,
+        status: article.status,
+      },
+    });
+
+    return mapWidgetArticle(article);
+  }
+
   // ===== Private helpers =====
 
   private static async resolveOwnedInstallation(
@@ -892,6 +1219,85 @@ export class WidgetService {
       throw new AppError("FAQ entry not found", HTTP_STATUS.NOT_FOUND);
     }
     return entry;
+  }
+
+  private static async resolveOwnedArticleCategory(
+    companyId: string,
+    installationId: string,
+    categoryId: string,
+    withCount = false
+  ) {
+    const category = await prisma.widgetArticleCategory.findFirst({
+      where: {
+        id: categoryId,
+        companyId,
+        widgetInstallationId: installationId,
+      },
+      ...(withCount
+        ? {
+            include: {
+              _count: {
+                select: {
+                  articles: true,
+                },
+              },
+            },
+          }
+        : {}),
+    });
+
+    if (!category) {
+      throw new AppError("Category not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return category;
+  }
+
+  private static async resolveOwnedArticle(
+    companyId: string,
+    installationId: string,
+    articleId: string,
+    includeRelations = false
+  ) {
+    const article = await prisma.widgetArticle.findFirst({
+      where: {
+        id: articleId,
+        companyId,
+        widgetInstallationId: installationId,
+      },
+      ...(includeRelations ? { include: widgetArticleInclude } : {}),
+    });
+
+    if (!article) {
+      throw new AppError("Article not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return article;
+  }
+
+  private static async assertValidCategory(
+    companyId: string,
+    installationId: string,
+    categoryId: string | null | undefined
+  ) {
+    if (categoryId === undefined) {
+      return;
+    }
+
+    if (categoryId === null) {
+      return;
+    }
+
+    await this.resolveOwnedArticleCategory(companyId, installationId, categoryId);
+  }
+
+  private static throwIfDuplicateSlug(error: unknown, message: string): never | void {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new AppError(message, HTTP_STATUS.CONFLICT);
+    }
   }
 
   // ===== Branding uploads (admin) =====

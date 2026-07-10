@@ -5,9 +5,11 @@ import { sendResponse } from "@/core/utils/send-response.js";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { WidgetService } from "./widget.service.js";
 import {
+  updateWidgetArticleStatusSchema,
   widgetBootstrapQuerySchema,
   widgetMessagesQuerySchema,
-} from "./widget.validation.js";import { AppError } from "@/core/errors/app-error.js";
+} from "./widget.validation.js";
+import { AppError } from "@/core/errors/app-error.js";
 import {
   Permissions,
   hasPermission,
@@ -22,6 +24,38 @@ const assertWidgetAdmin = (req: AuthenticatedRequest) => {
   if (!role || !hasPermission(role as UserRole, Permissions.manageWidget)) {
     throw new AppError(
       "Widget settings are restricted to workspace admins",
+      HTTP_STATUS.FORBIDDEN
+    );
+  }
+};
+
+const assertKnowledgeBaseManager = (req: AuthenticatedRequest) => {
+  const role = req.user?.role;
+  if (!role || !hasPermission(role as UserRole, Permissions.manageKnowledgeBase)) {
+    throw new AppError(
+      "Knowledge base management is restricted to workspace admins and supervisors",
+      HTTP_STATUS.FORBIDDEN
+    );
+  }
+};
+
+const assertKnowledgeBaseAdmin = (req: AuthenticatedRequest) => {
+  const role = req.user?.role as UserRole | undefined;
+  if (!role) {
+    throw new AppError(
+      "This knowledge base action is restricted to workspace admins",
+      HTTP_STATUS.FORBIDDEN
+    );
+  }
+
+  const isAdminRole =
+    role === UserRole.SUPER_ADMIN ||
+    role === UserRole.OWNER ||
+    role === UserRole.ADMIN;
+
+  if (!isAdminRole) {
+    throw new AppError(
+      "This knowledge base action is restricted to workspace admins",
       HTTP_STATUS.FORBIDDEN
     );
   }
@@ -224,6 +258,177 @@ export class WidgetController {
         statusCode: HTTP_STATUS.OK,
         message: "FAQ entry deleted successfully",
         data: null,
+      });
+    }
+  );
+
+  // ===== Knowledge base management (admin) =====
+
+  static listArticleCategories = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const categories = await WidgetService.listArticleCategories(
+        req.user!.companyId,
+        req.params.id as string
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Knowledge base categories retrieved successfully",
+        data: categories,
+      });
+    }
+  );
+
+  static createArticleCategory = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const category = await WidgetService.createArticleCategory(
+        req.user!.companyId,
+        req.params.id as string,
+        req.body,
+        req.user!.userId
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.CREATED,
+        message: "Knowledge base category created successfully",
+        data: category,
+      });
+    }
+  );
+
+  static updateArticleCategory = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const category = await WidgetService.updateArticleCategory(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.categoryId as string,
+        req.body,
+        req.user!.userId
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Knowledge base category updated successfully",
+        data: category,
+      });
+    }
+  );
+
+  static deleteArticleCategory = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseAdmin(req);
+      await WidgetService.deleteArticleCategory(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.categoryId as string,
+        req.user!.userId
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Knowledge base category deleted successfully",
+        data: null,
+      });
+    }
+  );
+
+  static listArticles = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const articles = await WidgetService.listArticles(
+        req.user!.companyId,
+        req.params.id as string
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Knowledge base articles retrieved successfully",
+        data: articles,
+      });
+    }
+  );
+
+  static getArticle = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const article = await WidgetService.getArticle(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.articleId as string
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Knowledge base article retrieved successfully",
+        data: article,
+      });
+    }
+  );
+
+  static createArticle = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const article = await WidgetService.createArticle(
+        req.user!.companyId,
+        req.params.id as string,
+        req.body,
+        req.user!.userId
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.CREATED,
+        message: "Knowledge base article created successfully",
+        data: article,
+      });
+    }
+  );
+
+  static updateArticle = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertKnowledgeBaseManager(req);
+      const article = await WidgetService.updateArticle(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.articleId as string,
+        req.body,
+        req.user!.userId
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Knowledge base article updated successfully",
+        data: article,
+      });
+    }
+  );
+
+  static updateArticleStatus = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const statusPayload = updateWidgetArticleStatusSchema.parse(req.body);
+      if (statusPayload.status === "ARCHIVED") {
+        assertKnowledgeBaseAdmin(req);
+      } else {
+        assertKnowledgeBaseManager(req);
+      }
+
+      const article = await WidgetService.updateArticleStatus(
+        req.user!.companyId,
+        req.params.id as string,
+        req.params.articleId as string,
+        statusPayload,
+        req.user!.userId
+      );
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message:
+          statusPayload.status === "PUBLISHED"
+            ? "Knowledge base article published successfully"
+            : "Knowledge base article archived successfully",
+        data: article,
       });
     }
   );

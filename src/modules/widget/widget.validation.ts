@@ -159,3 +159,63 @@ export type CreateWidgetFaqEntryInput = z.infer<
 export type UpdateWidgetFaqEntryInput = z.infer<
   typeof updateWidgetFaqEntrySchema
 >;
+
+// ===== Knowledge base — slug validation =====
+const slugSchema = z
+  .string()
+  .trim()
+  .min(1, "Slug is required")
+  .max(100, "Slug is too long")
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Slug must be lowercase letters, numbers and hyphens only (no leading, trailing or repeated hyphens)"
+  );
+
+// ===== Knowledge base — Category =====
+export const createWidgetArticleCategorySchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(100, "Name is too long"),
+  slug: slugSchema,
+  sortOrder: z.number().int().min(0, "Sort order must be non-negative").max(9999).optional(),
+});
+
+export const updateWidgetArticleCategorySchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(100, "Name is too long").optional(),
+  slug: slugSchema.optional(),
+  sortOrder: z.number().int().min(0, "Sort order must be non-negative").max(9999).optional(),
+});
+
+export type CreateWidgetArticleCategoryInput = z.infer<
+  typeof createWidgetArticleCategorySchema
+>;
+export type UpdateWidgetArticleCategoryInput = z.infer<
+  typeof updateWidgetArticleCategorySchema
+>;
+
+// ===== Knowledge base — Article =====
+export const createWidgetArticleSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(200, "Title is too long"),
+  slug: slugSchema,
+  summary: z.string().trim().min(1, "Summary is required").max(500, "Summary is too long"),
+  content: z.string().trim().min(1, "Content is required").max(50000, "Content is too long"),
+  categoryId: z.string().trim().min(1).max(128).optional().nullable(),
+  sortOrder: z.number().int().min(0, "Sort order must be non-negative").max(9999).optional(),
+});
+
+export const updateWidgetArticleSchema = z.object({
+  title: z.string().trim().min(1, "Title is required").max(200, "Title is too long").optional(),
+  slug: slugSchema.optional(),
+  summary: z.string().trim().min(1, "Summary is required").max(500, "Summary is too long").optional(),
+  content: z.string().trim().min(1, "Content is required").max(50000, "Content is too long").optional(),
+  categoryId: z.string().trim().min(1).max(128).optional().nullable(),
+  sortOrder: z.number().int().min(0, "Sort order must be non-negative").max(9999).optional(),
+});
+
+export const updateWidgetArticleStatusSchema = z.object({
+  status: z.enum(["PUBLISHED", "ARCHIVED"], {
+    message: "Status must be PUBLISHED or ARCHIVED",
+  }),
+});
+
+export type CreateWidgetArticleInput = z.infer<typeof createWidgetArticleSchema>;
+export type UpdateWidgetArticleInput = z.infer<typeof updateWidgetArticleSchema>;
+export type UpdateWidgetArticleStatusInput = z.infer<typeof updateWidgetArticleStatusSchema>;

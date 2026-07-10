@@ -3,11 +3,16 @@ import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { WidgetController } from "./widget.controller.js";
 import {
   createWidgetConversationSchema,
+  createWidgetArticleCategorySchema,
+  createWidgetArticleSchema,
   createWidgetInstallationSchema,
   createWidgetMessageSchema,
   updateWidgetInstallationSchema,
   createWidgetFaqEntrySchema,
   updateWidgetFaqEntrySchema,
+  updateWidgetArticleCategorySchema,
+  updateWidgetArticleSchema,
+  updateWidgetArticleStatusSchema,
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
@@ -173,6 +178,75 @@ router.delete(
   protect,
   authorize(...RBAC.admin),
   WidgetController.deleteFaqEntry
+);
+
+// ===== Knowledge base management (admin) =====
+router.get(
+  "/installations/:id/categories",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  WidgetController.listArticleCategories
+);
+
+router.post(
+  "/installations/:id/categories",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  validateRequest(createWidgetArticleCategorySchema),
+  WidgetController.createArticleCategory
+);
+
+router.patch(
+  "/installations/:id/categories/:categoryId",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  validateRequest(updateWidgetArticleCategorySchema),
+  WidgetController.updateArticleCategory
+);
+
+router.delete(
+  "/installations/:id/categories/:categoryId",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  WidgetController.deleteArticleCategory
+);
+
+router.get(
+  "/installations/:id/articles",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  WidgetController.listArticles
+);
+
+router.get(
+  "/installations/:id/articles/:articleId",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  WidgetController.getArticle
+);
+
+router.post(
+  "/installations/:id/articles",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  validateRequest(createWidgetArticleSchema),
+  WidgetController.createArticle
+);
+
+router.patch(
+  "/installations/:id/articles/:articleId",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  validateRequest(updateWidgetArticleSchema),
+  WidgetController.updateArticle
+);
+
+router.patch(
+  "/installations/:id/articles/:articleId/status",
+  protect,
+  authorize(...RBAC.knowledgeBase),
+  validateRequest(updateWidgetArticleStatusSchema),
+  WidgetController.updateArticleStatus
 );
 
 // ===== Branding uploads (admin) =====

@@ -15,6 +15,7 @@ export const Permissions = {
   viewAnalytics: "view_analytics",
   manageTags: "manage_tags",
   manageSavedReplies: "manage_saved_replies",
+  manageKnowledgeBase: "manage_knowledge_base",
   operationalTicketActions: "operational_ticket_actions",
   operationalConversationActions: "operational_conversation_actions",
 } as const;
@@ -34,6 +35,7 @@ const rolePermissions: Record<UserRole, readonly Permission[]> = {
     Permissions.viewAnalytics,
     Permissions.manageTags,
     Permissions.manageSavedReplies,
+    Permissions.manageKnowledgeBase,
     Permissions.operationalTicketActions,
     Permissions.operationalConversationActions,
   ],

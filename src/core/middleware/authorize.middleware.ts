@@ -11,6 +11,7 @@ import {
 export const RBAC = {
   admin: rolesWithPermission(Permissions.manageSettings),
   adminAndLead: rolesWithPermission(Permissions.manageTeams),
+  knowledgeBase: rolesWithPermission(Permissions.manageKnowledgeBase),
   operational: rolesWithPermission(Permissions.operationalConversationActions),
   readOnly: rolesWithPermission(Permissions.viewAnalytics),
 } as const satisfies Record<string, readonly UserRole[]>;
