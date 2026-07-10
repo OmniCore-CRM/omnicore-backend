@@ -43,6 +43,14 @@ export const updateWidgetInstallationSchema = z.object({
     .array(z.string().trim().min(1).max(120))
     .max(6, "Too many shortcuts")
     .optional(),
+  // Phase 3: branding
+  brandColor: z
+    .string()
+    .regex(/^#[0-9A-Fa-f]{6}$/, "Brand color must be a valid HEX color (#RRGGBB)")
+    .optional()
+    .nullable(),
+  logoUrl: z.string().url("Must be a valid URL").max(2048).optional().nullable(),
+  heroImageUrl: z.string().url("Must be a valid URL").max(2048).optional().nullable(),
 });
 
 // ===== Create widget conversation =====

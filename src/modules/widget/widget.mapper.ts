@@ -23,6 +23,9 @@ export const mapWidgetInstallation = (
   launcherLabel: installation.launcherLabel,
   footerNote: installation.footerNote,
   messageShortcuts: installation.messageShortcuts,
+  logoUrl: installation.logoUrl,
+  heroImageUrl: installation.heroImageUrl,
+  brandColor: installation.brandColor,
   createdAt: installation.createdAt,
   updatedAt: installation.updatedAt,
 });
@@ -44,6 +47,9 @@ export const mapWidgetBootstrap = (
   launcherLabel: installation.launcherLabel,
   footerNote: installation.footerNote,
   messageShortcuts: installation.messageShortcuts,
+  logoUrl: installation.logoUrl,
+  heroImageUrl: installation.heroImageUrl,
+  brandColor: installation.brandColor,
   faqEntries: faqEntries.map((e) => ({
     id: e.id,
     question: e.question,

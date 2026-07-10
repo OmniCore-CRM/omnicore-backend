@@ -227,4 +227,72 @@ export class WidgetController {
       });
     }
   );
+
+  // ===== Branding uploads (admin) =====
+
+  static uploadLogo = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      if (!req.file) throw new AppError("File is required", HTTP_STATUS.BAD_REQUEST);
+      const installation = await WidgetService.uploadBrandingImage(
+        req.user!.companyId,
+        req.params.id as string,
+        "logoUrl",
+        req.file
+      );
+      return sendResponse({ res, statusCode: HTTP_STATUS.OK, message: "Logo uploaded successfully", data: installation });
+    }
+  );
+
+  static uploadHero = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      if (!req.file) throw new AppError("File is required", HTTP_STATUS.BAD_REQUEST);
+      const installation = await WidgetService.uploadBrandingImage(
+        req.user!.companyId,
+        req.params.id as string,
+        "heroImageUrl",
+        req.file
+      );
+      return sendResponse({ res, statusCode: HTTP_STATUS.OK, message: "Hero image uploaded successfully", data: installation });
+    }
+  );
+
+  static removeLogo = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      const installation = await WidgetService.removeBrandingImage(
+        req.user!.companyId,
+        req.params.id as string,
+        "logoUrl"
+      );
+      return sendResponse({ res, statusCode: HTTP_STATUS.OK, message: "Logo removed successfully", data: installation });
+    }
+  );
+
+  static removeHero = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      assertWidgetAdmin(req);
+      const installation = await WidgetService.removeBrandingImage(
+        req.user!.companyId,
+        req.params.id as string,
+        "heroImageUrl"
+      );
+      return sendResponse({ res, statusCode: HTTP_STATUS.OK, message: "Hero image removed successfully", data: installation });
+    }
+  );
+
+  static serveBrandingImage = asyncHandler(
+    async (req: Request, res: Response) => {
+      const { key } = req.params;
+      const { buffer, mimeType } = await WidgetService.serveBrandingImage(key as string);
+      // Public branding assets must be loadable cross-origin (widget landing page
+      // may be served from a different host than the API).
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Length", buffer.length);
+      res.setHeader("Cache-Control", "public, max-age=3600, immutable");
+      res.end(buffer);
+    }
+  );
 }

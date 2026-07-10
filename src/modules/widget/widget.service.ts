@@ -41,6 +41,8 @@ import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { attachmentStorage } from "@/modules/attachments/attachment.storage.js";
+import { validateBrandingFileSecurity } from "./widget.branding-upload.js";
 
 
 const safeUserSelect = {
@@ -203,6 +205,10 @@ export class WidgetService {
           : {}),
         ...(data.messageShortcuts !== undefined
           ? { messageShortcuts: data.messageShortcuts }
+          : {}),
+        // Phase 3: branding
+        ...(typeof data.brandColor === "string"
+          ? { brandColor: data.brandColor || null }
           : {}),
       },
     });
@@ -887,4 +893,101 @@ export class WidgetService {
     }
     return entry;
   }
+
+  // ===== Branding uploads (admin) =====
+
+  static async uploadBrandingImage(
+    companyId: string,
+    installationId: string,
+    field: "logoUrl" | "heroImageUrl",
+    file: Express.Multer.File
+  ) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+    validateBrandingFileSecurity(file);
+
+    // Delete previous image from storage if exists
+    const current = await prisma.widgetInstallation.findUnique({
+      where: { id: installationId },
+      select: { logoUrl: true, heroImageUrl: true },
+    });
+    const prevKey = field === "logoUrl" ? current?.logoUrl : current?.heroImageUrl;
+    if (prevKey) {
+      // Extract storage key from stored path  
+      const existingKey = prevKey.split("/").pop();
+      if (existingKey) await attachmentStorage.remove(existingKey).catch(() => undefined);
+    }
+
+    const storageKey = await attachmentStorage.save(file.buffer);
+    const url = `/api/v1/widget/branding/${storageKey}`;
+
+    const updated = await prisma.widgetInstallation.update({
+      where: { id: installationId },
+      data: { [field]: url },
+    });
+
+    return mapWidgetInstallation(updated);
+  }
+
+  static async removeBrandingImage(
+    companyId: string,
+    installationId: string,
+    field: "logoUrl" | "heroImageUrl"
+  ) {
+    await this.resolveOwnedInstallation(companyId, installationId);
+
+    const current = await prisma.widgetInstallation.findUnique({
+      where: { id: installationId },
+      select: { logoUrl: true, heroImageUrl: true },
+    });
+    const prevKey = field === "logoUrl" ? current?.logoUrl : current?.heroImageUrl;
+    if (prevKey) {
+      const existingKey = prevKey.split("/").pop();
+      if (existingKey) await attachmentStorage.remove(existingKey).catch(() => undefined);
+    }
+
+    const updated = await prisma.widgetInstallation.update({
+      where: { id: installationId },
+      data: { [field]: null },
+    });
+
+    return mapWidgetInstallation(updated);
+  }
+
+  static async serveBrandingImage(storageKey: string): Promise<{ buffer: Buffer; mimeType: string }> {
+    // Validate key is a UUID (no path traversal)
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(storageKey)) {
+      throw new AppError("Branding asset not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await attachmentStorage.read(storageKey);
+    } catch {
+      throw new AppError("Branding asset not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    // Detect MIME type from magic bytes
+    const mimeType = detectImageMimeType(buffer);
+    if (!mimeType) {
+      throw new AppError("Branding asset not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return { buffer, mimeType };
+  }
+}
+
+function detectImageMimeType(buffer: Buffer): string | null {
+  if (buffer.length < 4) return null;
+  // JPEG: ff d8 ff
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  // PNG: 89 50 4e 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "image/png";
+  // WebP: RIFF....WEBP
+  if (
+    buffer.length >= 12 &&
+    buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+    buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+  ) return "image/webp";
+  return null;
 }

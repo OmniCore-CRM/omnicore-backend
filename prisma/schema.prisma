@@ -422,6 +422,11 @@ model WidgetInstallation {
   footerNote         String?
   messageShortcuts   String[]
 
+  // Phase 3: branding
+  logoUrl      String?
+  heroImageUrl String?
+  brandColor   String?
+
   faqEntries WidgetFaqEntry[]
 
   createdAt DateTime @default(now())

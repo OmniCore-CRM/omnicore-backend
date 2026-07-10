@@ -14,6 +14,7 @@ import { protect } from "@/core/middleware/auth.middleware.js";
 import { authorize, RBAC } from "@/core/middleware/authorize.middleware.js";
 import { AttachmentController } from "@/modules/attachments/attachment.controller.js";
 import { uploadSingleAttachment } from "@/modules/attachments/attachment.upload.js";
+import { uploadBrandingImage } from "./widget.branding-upload.js";
 
 const router = Router();
 
@@ -172,6 +173,41 @@ router.delete(
   protect,
   authorize(...RBAC.admin),
   WidgetController.deleteFaqEntry
+);
+
+// ===== Branding uploads (admin) =====
+
+// Public: serve branding images without auth (logo/hero on public widget page)
+router.get("/branding/:key", WidgetController.serveBrandingImage);
+
+router.post(
+  "/installations/:id/logo",
+  protect,
+  authorize(...RBAC.admin),
+  uploadBrandingImage,
+  WidgetController.uploadLogo
+);
+
+router.delete(
+  "/installations/:id/logo",
+  protect,
+  authorize(...RBAC.admin),
+  WidgetController.removeLogo
+);
+
+router.post(
+  "/installations/:id/hero",
+  protect,
+  authorize(...RBAC.admin),
+  uploadBrandingImage,
+  WidgetController.uploadHero
+);
+
+router.delete(
+  "/installations/:id/hero",
+  protect,
+  authorize(...RBAC.admin),
+  WidgetController.removeHero
 );
 
 export default router;
