@@ -793,8 +793,20 @@ export class WidgetService {
       conversationId: string;
       messageContent: string;
       subject?: string;
-      mode: "create" | "message";
+      mode: "create";
       actorId: string;
+      slaPolicy?: {
+        firstResponseMinutes: number;
+        resolutionMinutes: number;
+      } | null;
+    } | {
+      companyId: string;
+      customerId: string;
+      conversationId: string;
+      messageContent: string;
+      subject?: string;
+      mode: "message";
+      actorId?: string;
       slaPolicy?: {
         firstResponseMinutes: number;
         resolutionMinutes: number;
@@ -839,7 +851,7 @@ export class WidgetService {
         data: {
           companyId: input.companyId,
           ticketId: existingActiveTicket.id,
-          actorId: actor.id,
+          actorId: input.actorId ?? null,
           action: TicketActivityAction.MESSAGE_RECEIVED_ON_WIDGET,
           metadata: {
             source: "widget",
@@ -854,13 +866,16 @@ export class WidgetService {
       };
     }
 
+    const createdById =
+      input.actorId ??
+      (await this.resolveWidgetAutomationActorId(input.companyId));
     const createdAt = new Date();
     const createdTicket = await tx.ticket.create({
       data: {
         companyId: input.companyId,
         customerId: input.customerId,
         conversationId: input.conversationId,
-        createdById: input.actorId,
+        createdById,
         subject: input.subject?.trim() || deriveTicketSubject(input.messageContent),
         description: input.messageContent,
         status: TicketStatus.OPEN,
@@ -909,53 +924,52 @@ export class WidgetService {
   }
 
   private static async createConversationFromPublicInput(input: {
-      companyId: string;
-      visitorName: string;
-      visitorEmail?: string;
-      visitorPhone?: string;
-      initialMessage: string;
-      ticketSubject?: string;
-    }
-  ) {
-      const [actor, slaPolicy] = await Promise.all([
-        prisma.user.findFirst({
-          where: {
-            companyId: input.companyId,
-            role: {
-              in: [
-                UserRole.OWNER,
-                UserRole.ADMIN,
-                UserRole.TEAM_LEAD,
-                UserRole.AGENT,
-                UserRole.SUPER_ADMIN,
-              ],
-            },
+    companyId: string;
+    visitorName: string;
+    visitorEmail?: string;
+    visitorPhone?: string;
+    initialMessage: string;
+    ticketSubject?: string;
+  }) {
+    const [actor, slaPolicy] = await Promise.all([
+      prisma.user.findFirst({
+        where: {
+          companyId: input.companyId,
+          role: {
+            in: [
+              UserRole.OWNER,
+              UserRole.ADMIN,
+              UserRole.TEAM_LEAD,
+              UserRole.AGENT,
+              UserRole.SUPER_ADMIN,
+            ],
           },
-          orderBy: {
-            createdAt: "asc",
-          },
-          select: {
-            id: true,
-          },
-        }),
-        prisma.slaPolicy.findFirst({
-          where: {
-            companyId: input.companyId,
-            priority: TicketPriority.MEDIUM,
-            enabled: true,
-          },
-          orderBy: {
-            updatedAt: "desc",
-          },
-        }),
-      ]);
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        select: {
+          id: true,
+        },
+      }),
+      prisma.slaPolicy.findFirst({
+        where: {
+          companyId: input.companyId,
+          priority: TicketPriority.MEDIUM,
+          enabled: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      }),
+    ]);
 
-      if (!actor) {
-        throw new AppError(
-          "Widget ticket automation is not configured",
-          HTTP_STATUS.INTERNAL_SERVER_ERROR
-        );
-      }
+    if (!actor) {
+      throw new AppError(
+        "Widget ticket automation is not configured",
+        HTTP_STATUS.INTERNAL_SERVER_ERROR
+      );
+    }
 
     return prisma.$transaction(async (tx) => {
       const existingCustomer = input.visitorEmail
@@ -1028,6 +1042,38 @@ export class WidgetService {
         ticket,
       };
     }, { timeout: 15_000 });
+  }
+
+  private static async resolveWidgetAutomationActorId(companyId: string) {
+    const actor = await prisma.user.findFirst({
+      where: {
+        companyId,
+        role: {
+          in: [
+            UserRole.OWNER,
+            UserRole.ADMIN,
+            UserRole.TEAM_LEAD,
+            UserRole.AGENT,
+            UserRole.SUPER_ADMIN,
+          ],
+        },
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!actor) {
+      throw new AppError(
+        "Widget ticket automation is not configured",
+        HTTP_STATUS.INTERNAL_SERVER_ERROR
+      );
+    }
+
+    return actor.id;
   }
 
   // ===== FAQ management (admin) =====
