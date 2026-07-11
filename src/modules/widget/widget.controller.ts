@@ -8,6 +8,7 @@ import {
   updateWidgetArticleStatusSchema,
   widgetPublicArticleParamsSchema,
   widgetPublicArticleQuerySchema,
+  widgetPublicAskSchema,
   widgetPublicHelpCenterQuerySchema,
   widgetBootstrapQuerySchema,
   widgetMessagesQuerySchema,
@@ -170,6 +171,23 @@ export class WidgetController {
         statusCode: HTTP_STATUS.OK,
         message: "Public help center article retrieved successfully",
         data: payload,
+      });
+    }
+  );
+
+  static askPublicHelpCenter = asyncHandler(
+    async (req: Request, res: Response) => {
+      const payload = widgetPublicAskSchema.parse(req.body);
+      const answer = await WidgetService.answerPublicHelpCenterQuestion(
+        payload,
+        getRequestOrigin(req)
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Public help center answer retrieved successfully",
+        data: answer,
       });
     }
   );

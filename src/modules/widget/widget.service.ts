@@ -25,6 +25,7 @@ import type {
   CreateWidgetArticleInput,
   UpdateWidgetArticleInput,
   UpdateWidgetArticleStatusInput,
+  WidgetPublicAskInput,
 } from "./widget.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -89,6 +90,25 @@ type RequestOrigin = string | undefined;
 const WIDGET_ACCESS_ERROR = "Widget is not available";
 const WIDGET_MESSAGE_WINDOW_MS = 30 * 1000;
 const WIDGET_MESSAGE_WINDOW_MAX = 5;
+const PUBLIC_ANSWER_TOKEN_LIMIT = 12;
+const PUBLIC_ANSWER_LIMIT = 3;
+
+const normalizeQuestionText = (value: string) =>
+  value
+    .trim()
+    .replace(/\s+/g, " ");
+
+const tokenizeQuestion = (question: string) => {
+  const uniqueTokens = new Set(
+    question
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2)
+  );
+
+  return Array.from(uniqueTokens).slice(0, PUBLIC_ANSWER_TOKEN_LIMIT);
+};
 
 const normalizeDomain = (domain: string) => {
   const trimmed = domain.trim().toLowerCase();
@@ -1323,6 +1343,157 @@ export class WidgetService {
       logoUrl: installation.logoUrl,
       brandColor: installation.brandColor,
       article: mapPublicWidgetArticle(article),
+    };
+  }
+
+  static async answerPublicHelpCenterQuestion(
+    input: WidgetPublicAskInput,
+    requestOrigin: RequestOrigin
+  ) {
+    const installation = await this.resolveEnabledInstallation(
+      input.publicKey,
+      requestOrigin
+    );
+
+    const normalizedQuestion = normalizeQuestionText(input.question);
+    const tokens = tokenizeQuestion(normalizedQuestion);
+
+    const baseWhere = {
+      companyId: installation.companyId,
+      widgetInstallationId: installation.id,
+      status: WidgetArticleStatus.PUBLISHED,
+    } satisfies Prisma.WidgetArticleWhereInput;
+
+    const publishedCount = await prisma.widgetArticle.count({
+      where: baseWhere,
+    });
+
+    if (publishedCount === 0) {
+      return {
+        publicKey: installation.publicKey,
+        question: normalizedQuestion,
+        state: "EMPTY" as const,
+        message:
+          "No published help articles are available yet. Please check back later.",
+        answer: null,
+        suggestions: [],
+      };
+    }
+
+    const candidates = await prisma.widgetArticle.findMany({
+      where: {
+        ...baseWhere,
+        OR: [
+          {
+            title: {
+              contains: normalizedQuestion,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            summary: {
+              contains: normalizedQuestion,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            content: {
+              contains: normalizedQuestion,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          ...tokens.flatMap((token) => [
+            {
+              title: {
+                contains: token,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+            {
+              summary: {
+                contains: token,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+            {
+              content: {
+                contains: token,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+          ]),
+        ],
+      },
+      include: {
+        category: true,
+      },
+      orderBy: [{ sortOrder: "asc" }, { publishedAt: "desc" }, { id: "desc" }],
+      take: 30,
+    });
+
+    if (candidates.length === 0) {
+      return {
+        publicKey: installation.publicKey,
+        question: normalizedQuestion,
+        state: "NO_MATCH" as const,
+        message:
+          "No matching answer found. Try rephrasing your question or browsing Help Centre articles.",
+        answer: null,
+        suggestions: [],
+      };
+    }
+
+    const questionLc = normalizedQuestion.toLowerCase();
+    const scored = candidates
+      .map((article) => {
+        const title = article.title.toLowerCase();
+        const summary = article.summary.toLowerCase();
+        const content = article.content.toLowerCase();
+
+        let score = 0;
+
+        if (title.includes(questionLc)) score += 120;
+        if (summary.includes(questionLc)) score += 80;
+        if (content.includes(questionLc)) score += 40;
+
+        for (const token of tokens) {
+          if (title.includes(token)) score += 16;
+          if (summary.includes(token)) score += 10;
+          if (content.includes(token)) score += 5;
+        }
+
+        const excerptSource = article.content.trim() || article.summary.trim();
+        const excerpt =
+          excerptSource.length > 280
+            ? `${excerptSource.slice(0, 277)}...`
+            : excerptSource;
+
+        return {
+          score,
+          article: mapPublicWidgetArticle(article),
+          excerpt,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, PUBLIC_ANSWER_LIMIT);
+
+    const [best, ...suggestions] = scored;
+
+    return {
+      publicKey: installation.publicKey,
+      question: normalizedQuestion,
+      state: "ANSWERED" as const,
+      message: "Found matching help article answers.",
+      answer: best
+        ? {
+            article: best.article,
+            excerpt: best.excerpt,
+          }
+        : null,
+      suggestions: suggestions.map((item) => ({
+        article: item.article,
+        excerpt: item.excerpt,
+      })),
     };
   }
 

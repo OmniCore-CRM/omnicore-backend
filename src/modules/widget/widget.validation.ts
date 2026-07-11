@@ -132,6 +132,15 @@ export const widgetPublicArticleQuerySchema = z.object({
   key: publicKeySchema,
 });
 
+export const widgetPublicAskSchema = z.object({
+  publicKey: publicKeySchema,
+  question: z
+    .string()
+    .trim()
+    .min(2, "Question must be at least 2 characters")
+    .max(300, "Question is too long"),
+});
+
 export type CreateWidgetInstallationInput = z.infer<
   typeof createWidgetInstallationSchema
 >;
@@ -162,6 +171,10 @@ export type WidgetPublicArticleParamsInput = z.infer<
 
 export type WidgetPublicArticleQueryInput = z.infer<
   typeof widgetPublicArticleQuerySchema
+>;
+
+export type WidgetPublicAskInput = z.infer<
+  typeof widgetPublicAskSchema
 >;
 
 // ===== FAQ management (admin) =====

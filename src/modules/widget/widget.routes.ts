@@ -13,6 +13,7 @@ import {
   updateWidgetArticleCategorySchema,
   updateWidgetArticleSchema,
   updateWidgetArticleStatusSchema,
+  widgetPublicAskSchema,
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
@@ -135,6 +136,13 @@ router.get(
   "/help-center/articles/:slug",
   widgetReadRateLimit,
   WidgetController.getPublicHelpCenterArticle
+);
+
+router.post(
+  "/help-center/ask",
+  widgetReadRateLimit,
+  validateRequest(widgetPublicAskSchema),
+  WidgetController.askPublicHelpCenter
 );
 
 // Create public widget conversation
