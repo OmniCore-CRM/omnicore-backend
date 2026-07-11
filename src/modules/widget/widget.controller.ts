@@ -6,6 +6,9 @@ import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js"
 import { WidgetService } from "./widget.service.js";
 import {
   updateWidgetArticleStatusSchema,
+  widgetPublicArticleParamsSchema,
+  widgetPublicArticleQuerySchema,
+  widgetPublicHelpCenterQuerySchema,
   widgetBootstrapQuerySchema,
   widgetMessagesQuerySchema,
 } from "./widget.validation.js";
@@ -131,6 +134,42 @@ export class WidgetController {
         statusCode: HTTP_STATUS.OK,
         message: "Widget bootstrap retrieved successfully",
         data: config,
+      });
+    }
+  );
+
+  static getPublicHelpCenter = asyncHandler(
+    async (req: Request, res: Response) => {
+      const query = widgetPublicHelpCenterQuerySchema.parse(req.query);
+      const payload = await WidgetService.listPublicHelpCenter(
+        query,
+        getRequestOrigin(req)
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Public help center retrieved successfully",
+        data: payload,
+      });
+    }
+  );
+
+  static getPublicHelpCenterArticle = asyncHandler(
+    async (req: Request, res: Response) => {
+      const query = widgetPublicArticleQuerySchema.parse(req.query);
+      const params = widgetPublicArticleParamsSchema.parse(req.params);
+      const payload = await WidgetService.getPublicHelpCenterArticle(
+        query.key,
+        params.slug,
+        getRequestOrigin(req)
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Public help center article retrieved successfully",
+        data: payload,
       });
     }
   );

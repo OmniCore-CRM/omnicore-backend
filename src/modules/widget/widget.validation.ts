@@ -101,6 +101,37 @@ export const widgetMessagesQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(30),
 });
 
+export const widgetPublicHelpCenterQuerySchema = z.object({
+  key: publicKeySchema,
+  category: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Category must be a valid lowercase slug"
+    )
+    .optional(),
+  search: z.string().trim().max(120, "Search is too long").optional(),
+});
+
+export const widgetPublicArticleParamsSchema = z.object({
+  slug: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Article slug must be a valid lowercase slug"
+    ),
+});
+
+export const widgetPublicArticleQuerySchema = z.object({
+  key: publicKeySchema,
+});
+
 export type CreateWidgetInstallationInput = z.infer<
   typeof createWidgetInstallationSchema
 >;
@@ -119,6 +150,18 @@ export type CreateWidgetMessageInput = z.infer<
 
 export type WidgetMessagesQueryInput = z.infer<
   typeof widgetMessagesQuerySchema
+>;
+
+export type WidgetPublicHelpCenterQueryInput = z.infer<
+  typeof widgetPublicHelpCenterQuerySchema
+>;
+
+export type WidgetPublicArticleParamsInput = z.infer<
+  typeof widgetPublicArticleParamsSchema
+>;
+
+export type WidgetPublicArticleQueryInput = z.infer<
+  typeof widgetPublicArticleQuerySchema
 >;
 
 // ===== FAQ management (admin) =====

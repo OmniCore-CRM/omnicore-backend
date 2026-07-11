@@ -17,6 +17,7 @@ import type {
   CreateWidgetMessageInput,
   UpdateWidgetInstallationInput,
   WidgetMessagesQueryInput,
+  WidgetPublicHelpCenterQueryInput,
   CreateWidgetFaqEntryInput,
   UpdateWidgetFaqEntryInput,
   CreateWidgetArticleCategoryInput,
@@ -31,6 +32,9 @@ import {
   mapWidgetBootstrap,
   mapWidgetArticle,
   mapWidgetArticleCategory,
+  mapPublicWidgetArticle,
+  mapPublicWidgetArticles,
+  mapPublicWidgetArticleCategories,
   mapWidgetArticleCategories,
   mapWidgetArticles,
   mapWidgetFaqEntries,
@@ -1190,6 +1194,136 @@ export class WidgetService {
     });
 
     return mapWidgetArticle(article);
+  }
+
+  static async listPublicHelpCenter(
+    query: WidgetPublicHelpCenterQueryInput,
+    requestOrigin: RequestOrigin
+  ) {
+    const installation = await this.resolveEnabledInstallation(
+      query.key,
+      requestOrigin
+    );
+
+    const normalizedSearch = query.search?.trim();
+    const normalizedCategory = query.category?.trim();
+
+    const [categories, articles] = await Promise.all([
+      prisma.widgetArticleCategory.findMany({
+        where: {
+          companyId: installation.companyId,
+          widgetInstallationId: installation.id,
+          articles: {
+            some: {
+              companyId: installation.companyId,
+              widgetInstallationId: installation.id,
+              status: WidgetArticleStatus.PUBLISHED,
+            },
+          },
+        },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      }),
+      prisma.widgetArticle.findMany({
+        where: {
+          companyId: installation.companyId,
+          widgetInstallationId: installation.id,
+          status: WidgetArticleStatus.PUBLISHED,
+          ...(normalizedCategory
+            ? {
+                category: {
+                  slug: normalizedCategory,
+                },
+              }
+            : {}),
+          ...(normalizedSearch
+            ? {
+                OR: [
+                  {
+                    title: {
+                      contains: normalizedSearch,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                  {
+                    summary: {
+                      contains: normalizedSearch,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                  {
+                    content: {
+                      contains: normalizedSearch,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+        include: {
+          category: true,
+        },
+        orderBy: [{ sortOrder: "asc" }, { publishedAt: "desc" }, { id: "desc" }],
+      }),
+    ]);
+
+    return {
+      publicKey: installation.publicKey,
+      companyDisplayName: installation.companyDisplayName,
+      welcomeTitle: installation.welcomeTitle,
+      welcomeSubtitle: installation.welcomeSubtitle,
+      chatGreeting: installation.chatGreeting,
+      launcherLabel: installation.launcherLabel,
+      footerNote: installation.footerNote,
+      messageShortcuts: installation.messageShortcuts,
+      logoUrl: installation.logoUrl,
+      heroImageUrl: installation.heroImageUrl,
+      brandColor: installation.brandColor,
+      filters: {
+        category: normalizedCategory ?? null,
+        search: normalizedSearch ?? "",
+      },
+      categories: mapPublicWidgetArticleCategories(categories),
+      articles: mapPublicWidgetArticles(articles),
+    };
+  }
+
+  static async getPublicHelpCenterArticle(
+    publicKey: string,
+    slug: string,
+    requestOrigin: RequestOrigin
+  ) {
+    const installation = await this.resolveEnabledInstallation(
+      publicKey,
+      requestOrigin
+    );
+
+    const article = await prisma.widgetArticle.findFirst({
+      where: {
+        companyId: installation.companyId,
+        widgetInstallationId: installation.id,
+        slug,
+        status: WidgetArticleStatus.PUBLISHED,
+      },
+      include: {
+        category: true,
+      },
+    });
+
+    if (!article) {
+      throw new AppError("Article not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return {
+      publicKey: installation.publicKey,
+      companyDisplayName: installation.companyDisplayName,
+      chatGreeting: installation.chatGreeting,
+      launcherLabel: installation.launcherLabel,
+      messageShortcuts: installation.messageShortcuts,
+      logoUrl: installation.logoUrl,
+      brandColor: installation.brandColor,
+      article: mapPublicWidgetArticle(article),
+    };
   }
 
   // ===== Private helpers =====

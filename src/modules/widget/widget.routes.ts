@@ -125,6 +125,18 @@ router.get(
   WidgetController.bootstrap
 );
 
+router.get(
+  "/help-center",
+  widgetReadRateLimit,
+  WidgetController.getPublicHelpCenter
+);
+
+router.get(
+  "/help-center/articles/:slug",
+  widgetReadRateLimit,
+  WidgetController.getPublicHelpCenterArticle
+);
+
 // Create public widget conversation
 router.post(
   "/conversations",

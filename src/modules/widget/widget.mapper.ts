@@ -129,6 +129,40 @@ export const mapWidgetArticle = (article: WidgetArticleWithRelations) => ({
 export const mapWidgetArticles = (articles: WidgetArticleWithRelations[]) =>
   articles.map(mapWidgetArticle);
 
+export const mapPublicWidgetArticleCategory = (category: WidgetArticleCategory) => ({
+  id: category.id,
+  name: category.name,
+  slug: category.slug,
+  sortOrder: category.sortOrder,
+});
+
+export const mapPublicWidgetArticleCategories = (
+  categories: WidgetArticleCategory[]
+) => categories.map(mapPublicWidgetArticleCategory);
+
+type PublicWidgetArticleWithRelations = WidgetArticle & {
+  category?: WidgetArticleCategory | null;
+};
+
+export const mapPublicWidgetArticle = (
+  article: PublicWidgetArticleWithRelations
+) => ({
+  id: article.id,
+  title: article.title,
+  slug: article.slug,
+  summary: article.summary,
+  content: article.content,
+  publishedAt: article.publishedAt,
+  updatedAt: article.updatedAt,
+  category: article.category
+    ? mapPublicWidgetArticleCategory(article.category)
+    : null,
+});
+
+export const mapPublicWidgetArticles = (
+  articles: PublicWidgetArticleWithRelations[]
+) => articles.map(mapPublicWidgetArticle);
+
 export const mapPublicWidgetCustomer = (customer: Customer) => ({
   id: customer.id,
   firstName: customer.firstName,
