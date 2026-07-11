@@ -14,6 +14,7 @@ import {
   updateWidgetArticleSchema,
   updateWidgetArticleStatusSchema,
   widgetPublicAskSchema,
+  widgetSupportAskBodySchema,
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
@@ -29,6 +30,9 @@ const getClientIp = (req: Request) =>
 
 const publicWidgetKey = (req: Request) =>
   String(req.body?.publicKey || req.query?.key || "unknown-key");
+
+const publicSupportSlug = (req: Request) =>
+  String(req.params.companySlug || "unknown-slug");
 
 const widgetSessionKey = (req: Request) =>
   String(req.body?.sessionToken || req.query?.sessionToken || "unknown-session");
@@ -65,6 +69,16 @@ const widgetReadRateLimit = rateLimit({
     `key:${publicWidgetKey(req)}`,
     `session:${widgetSessionKey(req)}`,
     `conversation:${widgetConversationKey(req)}`,
+  ],
+});
+
+const widgetSupportReadRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyPrefix: "widget:support:read",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `slug:${publicSupportSlug(req)}`,
   ],
 });
 
@@ -143,6 +157,31 @@ router.post(
   widgetReadRateLimit,
   validateRequest(widgetPublicAskSchema),
   WidgetController.askPublicHelpCenter
+);
+
+router.get(
+  "/support/:companySlug/bootstrap",
+  widgetSupportReadRateLimit,
+  WidgetController.bootstrapSupportPortal
+);
+
+router.get(
+  "/support/:companySlug/help-center",
+  widgetSupportReadRateLimit,
+  WidgetController.getSupportHelpCenter
+);
+
+router.get(
+  "/support/:companySlug/help-center/articles/:articleSlug",
+  widgetSupportReadRateLimit,
+  WidgetController.getSupportHelpCenterArticle
+);
+
+router.post(
+  "/support/:companySlug/help-center/ask",
+  widgetSupportReadRateLimit,
+  validateRequest(widgetSupportAskBodySchema),
+  WidgetController.askSupportHelpCenter
 );
 
 // Create public widget conversation

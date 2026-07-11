@@ -10,6 +10,10 @@ import {
   widgetPublicArticleQuerySchema,
   widgetPublicAskSchema,
   widgetPublicHelpCenterQuerySchema,
+  widgetSupportArticleParamsSchema,
+  widgetSupportAskBodySchema,
+  widgetSupportHelpCenterQuerySchema,
+  widgetSupportPortalParamsSchema,
   widgetBootstrapQuerySchema,
   widgetMessagesQuerySchema,
 } from "./widget.validation.js";
@@ -187,6 +191,75 @@ export class WidgetController {
         res,
         statusCode: HTTP_STATUS.OK,
         message: "Public help center answer retrieved successfully",
+        data: answer,
+      });
+    }
+  );
+
+  static bootstrapSupportPortal = asyncHandler(
+    async (req: Request, res: Response) => {
+      const params = widgetSupportPortalParamsSchema.parse(req.params);
+      const config = await WidgetService.bootstrapByCompanySlug(
+        params.companySlug
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Support portal bootstrap retrieved successfully",
+        data: config,
+      });
+    }
+  );
+
+  static getSupportHelpCenter = asyncHandler(
+    async (req: Request, res: Response) => {
+      const params = widgetSupportPortalParamsSchema.parse(req.params);
+      const query = widgetSupportHelpCenterQuerySchema.parse(req.query);
+      const payload = await WidgetService.listPublicHelpCenterByCompanySlug(
+        params.companySlug,
+        query
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Support portal help center retrieved successfully",
+        data: payload,
+      });
+    }
+  );
+
+  static getSupportHelpCenterArticle = asyncHandler(
+    async (req: Request, res: Response) => {
+      const params = widgetSupportArticleParamsSchema.parse(req.params);
+      const payload = await WidgetService.getPublicHelpCenterArticleByCompanySlug(
+        params.companySlug,
+        params.articleSlug
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Support portal article retrieved successfully",
+        data: payload,
+      });
+    }
+  );
+
+  static askSupportHelpCenter = asyncHandler(
+    async (req: Request, res: Response) => {
+      const params = widgetSupportPortalParamsSchema.parse(req.params);
+      const body = widgetSupportAskBodySchema.parse(req.body);
+      const answer = await WidgetService.answerPublicHelpCenterQuestionByCompanySlug(
+        params.companySlug,
+        body.question
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Support portal answer retrieved successfully",
         data: answer,
       });
     }

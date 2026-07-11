@@ -141,6 +141,56 @@ export const widgetPublicAskSchema = z.object({
     .max(300, "Question is too long"),
 });
 
+const companySlugSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1)
+  .max(63)
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    "Company slug must be a valid lowercase slug"
+  );
+
+export const widgetSupportPortalParamsSchema = z.object({
+  companySlug: companySlugSchema,
+});
+
+export const widgetSupportHelpCenterQuerySchema = z.object({
+  category: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Category must be a valid lowercase slug"
+    )
+    .optional(),
+  search: z.string().trim().max(120, "Search is too long").optional(),
+});
+
+export const widgetSupportArticleParamsSchema = z.object({
+  companySlug: companySlugSchema,
+  articleSlug: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(
+      /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      "Article slug must be a valid lowercase slug"
+    ),
+});
+
+export const widgetSupportAskBodySchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(2, "Question must be at least 2 characters")
+    .max(300, "Question is too long"),
+});
+
 export type CreateWidgetInstallationInput = z.infer<
   typeof createWidgetInstallationSchema
 >;
@@ -175,6 +225,22 @@ export type WidgetPublicArticleQueryInput = z.infer<
 
 export type WidgetPublicAskInput = z.infer<
   typeof widgetPublicAskSchema
+>;
+
+export type WidgetSupportPortalParamsInput = z.infer<
+  typeof widgetSupportPortalParamsSchema
+>;
+
+export type WidgetSupportHelpCenterQueryInput = z.infer<
+  typeof widgetSupportHelpCenterQuerySchema
+>;
+
+export type WidgetSupportArticleParamsInput = z.infer<
+  typeof widgetSupportArticleParamsSchema
+>;
+
+export type WidgetSupportAskBodyInput = z.infer<
+  typeof widgetSupportAskBodySchema
 >;
 
 // ===== FAQ management (admin) =====

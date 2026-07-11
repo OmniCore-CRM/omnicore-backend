@@ -26,6 +26,7 @@ import type {
   UpdateWidgetArticleInput,
   UpdateWidgetArticleStatusInput,
   WidgetPublicAskInput,
+  WidgetSupportHelpCenterQueryInput,
 } from "./widget.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -139,6 +140,9 @@ const normalizeAllowedDomains = (domains: string[]) => {
     new Set(domains.map(normalizeDomain).filter(Boolean))
   );
 };
+
+const normalizeCompanySlug = (value: string) =>
+  value.trim().toLowerCase();
 
 const createPublicKey = () =>
   `wpk_${crypto.randomBytes(24).toString("base64url")}`;
@@ -287,6 +291,20 @@ export class WidgetService {
 
     const faqEntries = await prisma.widgetFaqEntry.findMany({
       where: { widgetInstallationId: installation.id, companyId: installation.companyId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    });
+
+    return mapWidgetBootstrap(installation, faqEntries);
+  }
+
+  static async bootstrapByCompanySlug(companySlug: string) {
+    const installation = await this.resolvePublicPortalInstallation(companySlug);
+
+    const faqEntries = await prisma.widgetFaqEntry.findMany({
+      where: {
+        widgetInstallationId: installation.id,
+        companyId: installation.companyId,
+      },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
 
@@ -653,6 +671,39 @@ export class WidgetService {
         WIDGET_ACCESS_ERROR,
         HTTP_STATUS.FORBIDDEN
       );
+    }
+
+    return installation;
+  }
+
+  private static async resolvePublicPortalInstallation(companySlug: string) {
+    const normalizedSlug = normalizeCompanySlug(companySlug);
+
+    const company = await prisma.company.findFirst({
+      where: {
+        companySlug: normalizedSlug,
+        isActive: true,
+        supportPortalEnabled: true,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!company) {
+      throw new AppError("Support portal is unavailable", HTTP_STATUS.NOT_FOUND);
+    }
+
+    const installation = await prisma.widgetInstallation.findFirst({
+      where: {
+        companyId: company.id,
+        enabled: true,
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    });
+
+    if (!installation) {
+      throw new AppError("Support portal is unavailable", HTTP_STATUS.NOT_FOUND);
     }
 
     return installation;
@@ -1356,6 +1407,277 @@ export class WidgetService {
     );
 
     const normalizedQuestion = normalizeQuestionText(input.question);
+    const tokens = tokenizeQuestion(normalizedQuestion);
+
+    const baseWhere = {
+      companyId: installation.companyId,
+      widgetInstallationId: installation.id,
+      status: WidgetArticleStatus.PUBLISHED,
+    } satisfies Prisma.WidgetArticleWhereInput;
+
+    const publishedCount = await prisma.widgetArticle.count({
+      where: baseWhere,
+    });
+
+    if (publishedCount === 0) {
+      return {
+        publicKey: installation.publicKey,
+        question: normalizedQuestion,
+        state: "EMPTY" as const,
+        message:
+          "No published help articles are available yet. Please check back later.",
+        answer: null,
+        suggestions: [],
+      };
+    }
+
+    const candidates = await prisma.widgetArticle.findMany({
+      where: {
+        ...baseWhere,
+        OR: [
+          {
+            title: {
+              contains: normalizedQuestion,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            summary: {
+              contains: normalizedQuestion,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          {
+            content: {
+              contains: normalizedQuestion,
+              mode: Prisma.QueryMode.insensitive,
+            },
+          },
+          ...tokens.flatMap((token) => [
+            {
+              title: {
+                contains: token,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+            {
+              summary: {
+                contains: token,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+            {
+              content: {
+                contains: token,
+                mode: Prisma.QueryMode.insensitive,
+              },
+            },
+          ]),
+        ],
+      },
+      include: {
+        category: true,
+      },
+      orderBy: [{ sortOrder: "asc" }, { publishedAt: "desc" }, { id: "desc" }],
+      take: 30,
+    });
+
+    if (candidates.length === 0) {
+      return {
+        publicKey: installation.publicKey,
+        question: normalizedQuestion,
+        state: "NO_MATCH" as const,
+        message:
+          "No matching answer found. Try rephrasing your question or browsing Help Centre articles.",
+        answer: null,
+        suggestions: [],
+      };
+    }
+
+    const questionLc = normalizedQuestion.toLowerCase();
+    const scored = candidates
+      .map((article) => {
+        const title = article.title.toLowerCase();
+        const summary = article.summary.toLowerCase();
+        const content = article.content.toLowerCase();
+
+        let score = 0;
+
+        if (title.includes(questionLc)) score += 120;
+        if (summary.includes(questionLc)) score += 80;
+        if (content.includes(questionLc)) score += 40;
+
+        for (const token of tokens) {
+          if (title.includes(token)) score += 16;
+          if (summary.includes(token)) score += 10;
+          if (content.includes(token)) score += 5;
+        }
+
+        const excerptSource = article.content.trim() || article.summary.trim();
+        const excerpt =
+          excerptSource.length > 280
+            ? `${excerptSource.slice(0, 277)}...`
+            : excerptSource;
+
+        return {
+          score,
+          article: mapPublicWidgetArticle(article),
+          excerpt,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, PUBLIC_ANSWER_LIMIT);
+
+    const [best, ...suggestions] = scored;
+
+    return {
+      publicKey: installation.publicKey,
+      question: normalizedQuestion,
+      state: "ANSWERED" as const,
+      message: "Found matching help article answers.",
+      answer: best
+        ? {
+            article: best.article,
+            excerpt: best.excerpt,
+          }
+        : null,
+      suggestions: suggestions.map((item) => ({
+        article: item.article,
+        excerpt: item.excerpt,
+      })),
+    };
+  }
+
+  static async listPublicHelpCenterByCompanySlug(
+    companySlug: string,
+    query: WidgetSupportHelpCenterQueryInput
+  ) {
+    const installation = await this.resolvePublicPortalInstallation(companySlug);
+
+    const normalizedSearch = query.search?.trim();
+    const normalizedCategory = query.category?.trim();
+
+    const [categories, articles] = await Promise.all([
+      prisma.widgetArticleCategory.findMany({
+        where: {
+          companyId: installation.companyId,
+          widgetInstallationId: installation.id,
+          articles: {
+            some: {
+              companyId: installation.companyId,
+              widgetInstallationId: installation.id,
+              status: WidgetArticleStatus.PUBLISHED,
+            },
+          },
+        },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      }),
+      prisma.widgetArticle.findMany({
+        where: {
+          companyId: installation.companyId,
+          widgetInstallationId: installation.id,
+          status: WidgetArticleStatus.PUBLISHED,
+          ...(normalizedCategory
+            ? {
+                category: {
+                  slug: normalizedCategory,
+                },
+              }
+            : {}),
+          ...(normalizedSearch
+            ? {
+                OR: [
+                  {
+                    title: {
+                      contains: normalizedSearch,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                  {
+                    summary: {
+                      contains: normalizedSearch,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                  {
+                    content: {
+                      contains: normalizedSearch,
+                      mode: Prisma.QueryMode.insensitive,
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+        include: {
+          category: true,
+        },
+        orderBy: [{ sortOrder: "asc" }, { publishedAt: "desc" }, { id: "desc" }],
+      }),
+    ]);
+
+    return {
+      publicKey: installation.publicKey,
+      companyDisplayName: installation.companyDisplayName,
+      welcomeTitle: installation.welcomeTitle,
+      welcomeSubtitle: installation.welcomeSubtitle,
+      chatGreeting: installation.chatGreeting,
+      launcherLabel: installation.launcherLabel,
+      footerNote: installation.footerNote,
+      messageShortcuts: installation.messageShortcuts,
+      logoUrl: installation.logoUrl,
+      heroImageUrl: installation.heroImageUrl,
+      brandColor: installation.brandColor,
+      filters: {
+        category: normalizedCategory ?? null,
+        search: normalizedSearch ?? "",
+      },
+      categories: mapPublicWidgetArticleCategories(categories),
+      articles: mapPublicWidgetArticles(articles),
+    };
+  }
+
+  static async getPublicHelpCenterArticleByCompanySlug(
+    companySlug: string,
+    articleSlug: string
+  ) {
+    const installation = await this.resolvePublicPortalInstallation(companySlug);
+
+    const article = await prisma.widgetArticle.findFirst({
+      where: {
+        companyId: installation.companyId,
+        widgetInstallationId: installation.id,
+        slug: articleSlug,
+        status: WidgetArticleStatus.PUBLISHED,
+      },
+      include: {
+        category: true,
+      },
+    });
+
+    if (!article) {
+      throw new AppError("Article not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    return {
+      publicKey: installation.publicKey,
+      companyDisplayName: installation.companyDisplayName,
+      chatGreeting: installation.chatGreeting,
+      launcherLabel: installation.launcherLabel,
+      messageShortcuts: installation.messageShortcuts,
+      logoUrl: installation.logoUrl,
+      brandColor: installation.brandColor,
+      article: mapPublicWidgetArticle(article),
+    };
+  }
+
+  static async answerPublicHelpCenterQuestionByCompanySlug(
+    companySlug: string,
+    question: string
+  ) {
+    const installation = await this.resolvePublicPortalInstallation(companySlug);
+
+    const normalizedQuestion = normalizeQuestionText(question);
     const tokens = tokenizeQuestion(normalizedQuestion);
 
     const baseWhere = {
