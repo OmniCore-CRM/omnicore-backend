@@ -191,6 +191,41 @@ export const widgetSupportAskBodySchema = z.object({
     .max(300, "Question is too long"),
 });
 
+export const widgetSupportContactBodySchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1, "Name is required")
+      .max(120, "Name is too long"),
+    email: z
+      .string()
+      .trim()
+      .email("Invalid email address")
+      .max(255, "Email is too long"),
+    phone: z.string().trim().max(40, "Phone is too long").optional(),
+    subject: z
+      .string()
+      .trim()
+      .min(1, "Subject is required")
+      .max(160, "Subject is too long"),
+    message: z
+      .string()
+      .trim()
+      .min(1, "Message is required")
+      .max(5000, "Message is too long"),
+    website: z.string().trim().max(120, "Website field is too long").optional(),
+  })
+  .superRefine((data, context) => {
+    if (data.website?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["website"],
+        message: "Unable to submit contact request",
+      });
+    }
+  });
+
 export type CreateWidgetInstallationInput = z.infer<
   typeof createWidgetInstallationSchema
 >;
@@ -241,6 +276,10 @@ export type WidgetSupportArticleParamsInput = z.infer<
 
 export type WidgetSupportAskBodyInput = z.infer<
   typeof widgetSupportAskBodySchema
+>;
+
+export type WidgetSupportContactBodyInput = z.infer<
+  typeof widgetSupportContactBodySchema
 >;
 
 // ===== FAQ management (admin) =====

@@ -14,6 +14,7 @@ import {
   updateWidgetArticleSchema,
   updateWidgetArticleStatusSchema,
   widgetPublicAskSchema,
+  widgetSupportContactBodySchema,
   widgetSupportAskBodySchema,
 } from "./widget.validation.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
@@ -76,6 +77,16 @@ const widgetSupportReadRateLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
   keyPrefix: "widget:support:read",
+  keyGenerator: (req) => [
+    `ip:${getClientIp(req)}`,
+    `slug:${publicSupportSlug(req)}`,
+  ],
+});
+
+const widgetSupportContactRateLimit = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 8,
+  keyPrefix: "widget:support:contact",
   keyGenerator: (req) => [
     `ip:${getClientIp(req)}`,
     `slug:${publicSupportSlug(req)}`,
@@ -182,6 +193,13 @@ router.post(
   widgetSupportReadRateLimit,
   validateRequest(widgetSupportAskBodySchema),
   WidgetController.askSupportHelpCenter
+);
+
+router.post(
+  "/support/:companySlug/contact",
+  widgetSupportContactRateLimit,
+  validateRequest(widgetSupportContactBodySchema),
+  WidgetController.contactSupport
 );
 
 // Create public widget conversation

@@ -11,6 +11,7 @@ import {
   widgetPublicAskSchema,
   widgetPublicHelpCenterQuerySchema,
   widgetSupportArticleParamsSchema,
+  widgetSupportContactBodySchema,
   widgetSupportAskBodySchema,
   widgetSupportHelpCenterQuerySchema,
   widgetSupportPortalParamsSchema,
@@ -261,6 +262,24 @@ export class WidgetController {
         statusCode: HTTP_STATUS.OK,
         message: "Support portal answer retrieved successfully",
         data: answer,
+      });
+    }
+  );
+
+  static contactSupport = asyncHandler(
+    async (req: Request, res: Response) => {
+      const params = widgetSupportPortalParamsSchema.parse(req.params);
+      const body = widgetSupportContactBodySchema.parse(req.body);
+      const payload = await WidgetService.contactSupportByCompanySlug(
+        params.companySlug,
+        body
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.CREATED,
+        message: "Support request submitted successfully",
+        data: payload,
       });
     }
   );
