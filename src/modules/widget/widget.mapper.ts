@@ -153,7 +153,6 @@ export const mapPublicWidgetArticle = (
   summary: article.summary,
   content: article.content,
   publishedAt: article.publishedAt,
-  updatedAt: article.updatedAt,
   category: article.category
     ? mapPublicWidgetArticleCategory(article.category)
     : null,
