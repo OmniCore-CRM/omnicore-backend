@@ -17,6 +17,7 @@ import slaPolicyRoutes from "@/modules/sla-policies/sla-policy.routes.js";
 import assignmentRuleRoutes from "@/modules/assignment-rules/assignment-rule.routes.js";
 import notificationRoutes from "@/modules/notifications/notification.routes.js";
 import assignmentCenterRoutes from "@/modules/assignment-center/assignment-center.routes.js";
+import companyRoutes from "@/modules/companies/company.routes.js";
 
 const router = Router();
 
@@ -54,6 +55,9 @@ router.use("/assignment-center", assignmentCenterRoutes);
 
 // Widget routes
 router.use("/widget", widgetRoutes);
+
+// Company routes
+router.use("/companies", companyRoutes);
 
 // Channel routes
 router.use("/channels", channelRoutes);

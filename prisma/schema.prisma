@@ -148,9 +148,11 @@ enum WidgetArticleStatus {
 }
 
 model Company {
-  id       String  @id @default(cuid())
-  name     String
-  isActive Boolean @default(true)
+  id                   String  @id @default(cuid())
+  name                 String
+  isActive             Boolean @default(true)
+  companySlug          String? @unique @db.VarChar(63)
+  supportPortalEnabled Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

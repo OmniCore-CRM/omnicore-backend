@@ -6,6 +6,8 @@ export const mapCompany = (company: Company) => {
     id: company.id,
 
     name: company.name,
+    companySlug: company.companySlug,
+    supportPortalEnabled: company.supportPortalEnabled,
 
     createdAt: company.createdAt,
     updatedAt: company.updatedAt,
