@@ -1836,6 +1836,96 @@ export class WidgetService {
     };
   }
 
+  static async getSupportSitemapData() {
+    const companies = await prisma.company.findMany({
+      where: {
+        isActive: true,
+        supportPortalEnabled: true,
+        companySlug: {
+          not: null,
+        },
+      },
+      select: {
+        id: true,
+        companySlug: true,
+        widgetInstallations: {
+          where: {
+            enabled: true,
+          },
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 1,
+          select: {
+            id: true,
+            updatedAt: true,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    });
+
+    const installations = companies
+      .map((company) => {
+        const installation = company.widgetInstallations[0];
+        if (!company.companySlug || !installation) {
+          return null;
+        }
+
+        return {
+          companyId: company.id,
+          companySlug: company.companySlug,
+          installationId: installation.id,
+          installationUpdatedAt: installation.updatedAt,
+        };
+      })
+      .filter((item): item is {
+        companyId: string;
+        companySlug: string;
+        installationId: string;
+        installationUpdatedAt: Date;
+      } => Boolean(item));
+
+    if (installations.length === 0) {
+      return {
+        portals: [],
+      };
+    }
+
+    const articles = await prisma.widgetArticle.findMany({
+      where: {
+        status: WidgetArticleStatus.PUBLISHED,
+        widgetInstallationId: {
+          in: installations.map((item) => item.installationId),
+        },
+      },
+      select: {
+        widgetInstallationId: true,
+        slug: true,
+        publishedAt: true,
+        updatedAt: true,
+      },
+      orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
+    });
+
+    const byInstallation = new Map<string, typeof articles>();
+    for (const article of articles) {
+      const current = byInstallation.get(article.widgetInstallationId) ?? [];
+      current.push(article);
+      byInstallation.set(article.widgetInstallationId, current);
+    }
+
+    return {
+      portals: installations.map((item) => ({
+        companySlug: item.companySlug,
+        updatedAt: item.installationUpdatedAt,
+        articles: (byInstallation.get(item.installationId) ?? []).map((article) => ({
+          slug: article.slug,
+          publishedAt: article.publishedAt,
+          updatedAt: article.updatedAt,
+        })),
+      })),
+    };
+  }
+
   static async answerPublicHelpCenterQuestionByCompanySlug(
     companySlug: string,
     question: string

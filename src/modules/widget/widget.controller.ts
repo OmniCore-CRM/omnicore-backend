@@ -213,6 +213,19 @@ export class WidgetController {
     }
   );
 
+  static getSupportSitemap = asyncHandler(
+    async (_req: Request, res: Response) => {
+      const payload = await WidgetService.getSupportSitemapData();
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Support sitemap data retrieved successfully",
+        data: payload,
+      });
+    }
+  );
+
   static getSupportHelpCenter = asyncHandler(
     async (req: Request, res: Response) => {
       const params = widgetSupportPortalParamsSchema.parse(req.params);

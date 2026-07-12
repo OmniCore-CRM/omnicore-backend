@@ -171,6 +171,12 @@ router.post(
 );
 
 router.get(
+  "/support/sitemap",
+  widgetSupportReadRateLimit,
+  WidgetController.getSupportSitemap
+);
+
+router.get(
   "/support/:companySlug/bootstrap",
   widgetSupportReadRateLimit,
   WidgetController.bootstrapSupportPortal
