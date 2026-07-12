@@ -21,6 +21,8 @@ const cloudinaryConfigured =
   Boolean(env.CLOUDINARY_API_KEY) &&
   Boolean(env.CLOUDINARY_API_SECRET);
 
+const useCloudinaryStorage = env.STORAGE_PROVIDER === "cloudinary";
+
 if (cloudinaryConfigured) {
   cloudinary.config({
     cloud_name: env.CLOUDINARY_CLOUD_NAME,
@@ -85,9 +87,13 @@ class LocalAttachmentStorage implements AttachmentStorageProvider {
 }
 
 class CloudinaryBrandingStorage implements AttachmentStorageProvider {
-  private readonly folder = env.CLOUDINARY_BRANDING_FOLDER;
+  private readonly folder = env.CLOUDINARY_FOLDER;
 
   async save(buffer: Buffer) {
+    if (!useCloudinaryStorage) {
+      throw new Error("Cloudinary branding storage is disabled by STORAGE_PROVIDER");
+    }
+
     assertCloudinaryConfigured();
 
     const uploaded = await new Promise<{ public_id: string }>((resolve, reject) => {
@@ -169,7 +175,11 @@ class HybridBrandingStorage implements AttachmentStorageProvider {
   ) {}
 
   async save(buffer: Buffer) {
-    return this.cloudinaryStorage.save(buffer);
+    if (useCloudinaryStorage) {
+      return this.cloudinaryStorage.save(buffer);
+    }
+
+    return this.localStorage.save(buffer);
   }
 
   async read(storageKey: string) {

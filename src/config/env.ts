@@ -40,12 +40,13 @@ const envSchema = z.object({
   SOCKET_ORIGINS: z.string().optional(),
   TRUST_PROXY: z.string().optional(),
   JSON_BODY_LIMIT: z.string().default("1mb"),
+  STORAGE_PROVIDER: z.enum(["local", "cloudinary"]).default("local"),
   ATTACHMENT_STORAGE_DIR: z.string().default("storage/attachments"),
   ATTACHMENT_MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
-  CLOUDINARY_BRANDING_FOLDER: z.string().default("omnicore/branding"),
+  CLOUDINARY_FOLDER: z.string().default("omnicore/branding"),
 
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
   WHATSAPP_APP_SECRET: z.string().optional(),
@@ -116,28 +117,33 @@ const envSchema = z.object({
     });
   }
 
-  if (!value.CLOUDINARY_CLOUD_NAME) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["CLOUDINARY_CLOUD_NAME"],
-      message: "CLOUDINARY_CLOUD_NAME is required outside development",
-    });
-  }
+  if (value.STORAGE_PROVIDER === "cloudinary") {
+    if (!value.CLOUDINARY_CLOUD_NAME) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CLOUDINARY_CLOUD_NAME"],
+        message:
+          "CLOUDINARY_CLOUD_NAME is required when STORAGE_PROVIDER=cloudinary outside development",
+      });
+    }
 
-  if (!value.CLOUDINARY_API_KEY) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["CLOUDINARY_API_KEY"],
-      message: "CLOUDINARY_API_KEY is required outside development",
-    });
-  }
+    if (!value.CLOUDINARY_API_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CLOUDINARY_API_KEY"],
+        message:
+          "CLOUDINARY_API_KEY is required when STORAGE_PROVIDER=cloudinary outside development",
+      });
+    }
 
-  if (!value.CLOUDINARY_API_SECRET) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["CLOUDINARY_API_SECRET"],
-      message: "CLOUDINARY_API_SECRET is required outside development",
-    });
+    if (!value.CLOUDINARY_API_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["CLOUDINARY_API_SECRET"],
+        message:
+          "CLOUDINARY_API_SECRET is required when STORAGE_PROVIDER=cloudinary outside development",
+      });
+    }
   }
 
   if (value.EMAIL_PROVIDER && !value.RESEND_API_KEY) {
