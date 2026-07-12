@@ -9,6 +9,7 @@ import type {
   ForgotPasswordInput,
   ResetPasswordInput,
   AcceptInviteInput,
+  UpdateProfileInput,
 } from "./auth.validation.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
@@ -69,6 +70,16 @@ const buildAcceptInviteUrl = (token: string) => {
 
 const invalidSessionError = () =>
   new AppError("Session expired", HTTP_STATUS.UNAUTHORIZED);
+
+const splitDisplayName = (displayName: string) => {
+  const normalized = displayName.trim().replace(/\s+/g, " ");
+  const parts = normalized.split(" ").filter(Boolean);
+
+  const firstName = parts.shift() ?? "";
+  const lastName = parts.join(" ");
+
+  return { firstName, lastName };
+};
 
 export class AuthService {
   static async sendUserInviteEmail(input: {
@@ -771,5 +782,51 @@ export class AuthService {
       user: mapAuthResponse({ accessToken: "", user, company: user.company }).user,
       company: mapAuthResponse({ accessToken: "", user, company: user.company }).company,
     };
+  }
+
+  static async updateCurrentUserProfile(input: {
+    userId: string;
+    companyId: string;
+    displayName: UpdateProfileInput["displayName"];
+  }) {
+    const { firstName, lastName } = splitDisplayName(input.displayName);
+
+    if (!firstName) {
+      throw new AppError(
+        "Display name must include at least one visible character",
+        HTTP_STATUS.BAD_REQUEST,
+      );
+    }
+
+    const updated = await prisma.user.updateMany({
+      where: {
+        id: input.userId,
+        companyId: input.companyId,
+        isActive: true,
+        status: "ACTIVE",
+      },
+      data: {
+        firstName,
+        lastName,
+      },
+    });
+
+    if (updated.count === 0) {
+      throw new AppError("User not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    await AuditLogService.record({
+      companyId: input.companyId,
+      actorId: input.userId,
+      action: "USER_PROFILE_UPDATED",
+      entityType: "USER",
+      entityId: input.userId,
+      metadata: {
+        firstName,
+        lastName,
+      },
+    });
+
+    return this.getCurrentUser(input.userId, input.companyId);
   }
 }

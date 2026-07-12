@@ -7,6 +7,7 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   acceptInviteSchema,
+  updateProfileSchema,
 } from "./auth.validation.js";
 import { protect } from "@/core/middleware/auth.middleware.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
@@ -91,5 +92,12 @@ router.post(
 router.post("/logout", AuthController.logout);
 
 router.get("/me", protect, AuthController.me);
+
+router.patch(
+  "/me",
+  protect,
+  validateRequest(updateProfileSchema),
+  AuthController.updateMe,
+);
 
 export default router;

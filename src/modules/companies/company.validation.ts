@@ -80,6 +80,16 @@ export const companyPortalSettingsUpdateSchema = z.object({
   customSupportDomain: customSupportDomainSchema,
 });
 
+export const companyProfileUpdateSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(2, "Company name must be at least 2 characters")
+    .max(120, "Company name must be at most 120 characters"),
+});
+
 export type CompanyPortalSettingsUpdateInput = z.infer<
   typeof companyPortalSettingsUpdateSchema
 >;
+
+export type CompanyProfileUpdateInput = z.infer<typeof companyProfileUpdateSchema>;

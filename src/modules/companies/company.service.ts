@@ -8,7 +8,10 @@ import {
 import { prisma } from "@/config/db.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { AppError } from "@/core/errors/app-error.js";
-import type { CompanyPortalSettingsUpdateInput } from "./company.validation.js";
+import type {
+  CompanyPortalSettingsUpdateInput,
+  CompanyProfileUpdateInput,
+} from "./company.validation.js";
 
 const reservedPortalSlugs = new Set([
   "admin",
@@ -76,6 +79,27 @@ const toPortalSettingsResponse = (company: {
 });
 
 export class CompanyService {
+  static async updateCompanyProfile(
+    companyId: string,
+    input: CompanyProfileUpdateInput,
+  ) {
+    const company = await prisma.company.update({
+      where: { id: companyId },
+      data: {
+        name: input.name.trim(),
+      },
+    });
+
+    return {
+      company: {
+        id: company.id,
+        name: company.name,
+        companySlug: company.companySlug,
+        supportPortalEnabled: company.supportPortalEnabled,
+      },
+    };
+  }
+
   static async getPortalSettings(companyId: string) {
     const company = await prisma.company.findUnique({
       where: { id: companyId },

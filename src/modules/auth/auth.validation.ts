@@ -61,6 +61,16 @@ export const validateInviteQuerySchema = z.object({
 
 export type ValidateInviteQueryInput = z.infer<typeof validateInviteQuerySchema>;
 
+export const updateProfileSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(2, "Display name must be at least 2 characters")
+    .max(120, "Display name must be at most 120 characters"),
+});
+
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
 // ===== Authenticated JWT request payload =====
 export interface AuthenticatedUser {
   userId: string;

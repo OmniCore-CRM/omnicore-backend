@@ -148,4 +148,21 @@ export class AuthController {
       });
     }
   );
+
+  static updateMe = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const result = await AuthService.updateCurrentUserProfile({
+        userId: req.user!.userId,
+        companyId: req.user!.companyId,
+        displayName: req.body.displayName,
+      });
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Profile updated successfully",
+        data: result,
+      });
+    },
+  );
 }
