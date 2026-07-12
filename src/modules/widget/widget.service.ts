@@ -2211,27 +2211,35 @@ export class WidgetService {
     await this.resolveOwnedInstallation(companyId, installationId);
     validateBrandingFileSecurity(file);
 
-    // Delete previous image from storage if exists
+    // Capture previous key so we only remove it after new upload + DB update succeed.
     const current = await prisma.widgetInstallation.findUnique({
       where: { id: installationId },
       select: { logoUrl: true, heroImageUrl: true },
     });
     const prevKey = field === "logoUrl" ? current?.logoUrl : current?.heroImageUrl;
-    if (prevKey) {
-      // Extract storage key from stored path
-      const existingKey = extractBrandingStorageKey(prevKey);
-      if (existingKey) await brandingStorage.remove(existingKey).catch(() => undefined);
-    }
 
     const storageKey = await brandingStorage.save(file.buffer);
     const url = `/api/v1/widget/branding/${storageKey}`;
 
-    const updated = await prisma.widgetInstallation.update({
-      where: { id: installationId },
-      data: { [field]: url },
-    });
+    try {
+      const updated = await prisma.widgetInstallation.update({
+        where: { id: installationId },
+        data: { [field]: url },
+      });
 
-    return mapWidgetInstallation(updated);
+      if (prevKey) {
+        const existingKey = extractBrandingStorageKey(prevKey);
+        if (existingKey && existingKey !== storageKey) {
+          await brandingStorage.remove(existingKey).catch(() => undefined);
+        }
+      }
+
+      return mapWidgetInstallation(updated);
+    } catch (error) {
+      // DB update failed; clean up the newly uploaded asset to avoid orphaned files.
+      await brandingStorage.remove(storageKey).catch(() => undefined);
+      throw error;
+    }
   }
 
   static async removeBrandingImage(
