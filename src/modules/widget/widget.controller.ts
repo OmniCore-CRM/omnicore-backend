@@ -651,15 +651,27 @@ export class WidgetController {
 
   static serveBrandingImage = asyncHandler(
     async (req: Request, res: Response) => {
-      const { key } = req.params;
-      const { buffer, mimeType } = await WidgetService.serveBrandingImage(key as string);
-      // Public branding assets must be loadable cross-origin (widget landing page
-      // may be served from a different host than the API).
-      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Content-Type", mimeType);
-      res.setHeader("Content-Length", buffer.length);
-      res.setHeader("Cache-Control", "public, max-age=3600, immutable");
-      res.end(buffer);
+      try {
+        const { key } = req.params;
+        const { buffer, mimeType } = await WidgetService.serveBrandingImage(key as string);
+        // Public branding assets must be loadable cross-origin (widget landing page
+        // may be served from a different host than the API).
+        res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Content-Length", buffer.length);
+        res.setHeader("Cache-Control", "public, max-age=3600, immutable");
+        res.end(buffer);
+      } catch (error) {
+        if (error instanceof AppError && error.statusCode === HTTP_STATUS.NOT_FOUND) {
+          res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+          res.setHeader("Cache-Control", "no-store");
+          res.setHeader("Content-Type", "image/png");
+          res.setHeader("Content-Length", "0");
+          return res.status(HTTP_STATUS.NOT_FOUND).end();
+        }
+
+        throw error;
+      }
     }
   );
 }

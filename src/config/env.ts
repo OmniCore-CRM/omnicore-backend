@@ -42,6 +42,10 @@ const envSchema = z.object({
   JSON_BODY_LIMIT: z.string().default("1mb"),
   ATTACHMENT_STORAGE_DIR: z.string().default("storage/attachments"),
   ATTACHMENT_MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
+  CLOUDINARY_CLOUD_NAME: z.string().optional(),
+  CLOUDINARY_API_KEY: z.string().optional(),
+  CLOUDINARY_API_SECRET: z.string().optional(),
+  CLOUDINARY_BRANDING_FOLDER: z.string().default("omnicore/branding"),
 
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
   WHATSAPP_APP_SECRET: z.string().optional(),
@@ -109,6 +113,30 @@ const envSchema = z.object({
       code: "custom",
       path: ["WHATSAPP_ACCESS_TOKEN"],
       message: "WHATSAPP_ACCESS_TOKEN is required outside development",
+    });
+  }
+
+  if (!value.CLOUDINARY_CLOUD_NAME) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CLOUDINARY_CLOUD_NAME"],
+      message: "CLOUDINARY_CLOUD_NAME is required outside development",
+    });
+  }
+
+  if (!value.CLOUDINARY_API_KEY) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CLOUDINARY_API_KEY"],
+      message: "CLOUDINARY_API_KEY is required outside development",
+    });
+  }
+
+  if (!value.CLOUDINARY_API_SECRET) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["CLOUDINARY_API_SECRET"],
+      message: "CLOUDINARY_API_SECRET is required outside development",
     });
   }
 

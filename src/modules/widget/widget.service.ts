@@ -58,7 +58,7 @@ import { mapTicket } from "@/modules/tickets/ticket.mapper.js";
 import { mapAttachments } from "@/modules/attachments/attachment.mapper.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
-import { attachmentStorage } from "@/modules/attachments/attachment.storage.js";
+import { brandingStorage } from "@/modules/attachments/attachment.storage.js";
 import { validateBrandingFileSecurity } from "./widget.branding-upload.js";
 
 
@@ -94,6 +94,24 @@ const WIDGET_MESSAGE_WINDOW_MS = 30 * 1000;
 const WIDGET_MESSAGE_WINDOW_MAX = 5;
 const PUBLIC_ANSWER_TOKEN_LIMIT = 12;
 const PUBLIC_ANSWER_LIMIT = 3;
+
+const extractBrandingStorageKey = (value: string | null | undefined) => {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.pathname.split("/").filter(Boolean).pop() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  return trimmed.split("/").filter(Boolean).pop() ?? null;
+};
 
 const normalizeQuestionText = (value: string) =>
   value
@@ -2200,12 +2218,12 @@ export class WidgetService {
     });
     const prevKey = field === "logoUrl" ? current?.logoUrl : current?.heroImageUrl;
     if (prevKey) {
-      // Extract storage key from stored path  
-      const existingKey = prevKey.split("/").pop();
-      if (existingKey) await attachmentStorage.remove(existingKey).catch(() => undefined);
+      // Extract storage key from stored path
+      const existingKey = extractBrandingStorageKey(prevKey);
+      if (existingKey) await brandingStorage.remove(existingKey).catch(() => undefined);
     }
 
-    const storageKey = await attachmentStorage.save(file.buffer);
+    const storageKey = await brandingStorage.save(file.buffer);
     const url = `/api/v1/widget/branding/${storageKey}`;
 
     const updated = await prisma.widgetInstallation.update({
@@ -2229,8 +2247,8 @@ export class WidgetService {
     });
     const prevKey = field === "logoUrl" ? current?.logoUrl : current?.heroImageUrl;
     if (prevKey) {
-      const existingKey = prevKey.split("/").pop();
-      if (existingKey) await attachmentStorage.remove(existingKey).catch(() => undefined);
+      const existingKey = extractBrandingStorageKey(prevKey);
+      if (existingKey) await brandingStorage.remove(existingKey).catch(() => undefined);
     }
 
     const updated = await prisma.widgetInstallation.update({
@@ -2242,15 +2260,14 @@ export class WidgetService {
   }
 
   static async serveBrandingImage(storageKey: string): Promise<{ buffer: Buffer; mimeType: string }> {
-    // Validate key is a UUID (no path traversal)
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(storageKey)) {
+    const key = storageKey.trim();
+    if (!key) {
       throw new AppError("Branding asset not found", HTTP_STATUS.NOT_FOUND);
     }
 
     let buffer: Buffer;
     try {
-      buffer = await attachmentStorage.read(storageKey);
+      buffer = await brandingStorage.read(key);
     } catch {
       throw new AppError("Branding asset not found", HTTP_STATUS.NOT_FOUND);
     }
