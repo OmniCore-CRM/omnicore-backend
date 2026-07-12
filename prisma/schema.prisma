@@ -147,12 +147,39 @@ enum WidgetArticleStatus {
   ARCHIVED
 }
 
+enum DomainVerificationStatus {
+  NOT_CONFIGURED
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum DomainSslStatus {
+  NOT_CONFIGURED
+  PENDING
+  READY
+  FAILED
+}
+
+enum DomainStatus {
+  NOT_CONFIGURED
+  PENDING
+  READY
+  FAILED
+}
+
 model Company {
   id                   String  @id @default(cuid())
   name                 String
   isActive             Boolean @default(true)
   companySlug          String? @unique @db.VarChar(63)
   supportPortalEnabled Boolean @default(false)
+  customSupportDomain  String?                  @unique @db.VarChar(255)
+  verificationStatus   DomainVerificationStatus @default(NOT_CONFIGURED)
+  verificationToken    String?                  @db.VarChar(128)
+  verifiedAt           DateTime?
+  sslStatus            DomainSslStatus          @default(NOT_CONFIGURED)
+  domainStatus         DomainStatus             @default(NOT_CONFIGURED)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -8,6 +8,12 @@ export const mapCompany = (company: Company) => {
     name: company.name,
     companySlug: company.companySlug,
     supportPortalEnabled: company.supportPortalEnabled,
+    customSupportDomain: company.customSupportDomain,
+    verificationStatus: company.verificationStatus,
+    verificationToken: company.verificationToken,
+    verifiedAt: company.verifiedAt,
+    sslStatus: company.sslStatus,
+    domainStatus: company.domainStatus,
 
     createdAt: company.createdAt,
     updatedAt: company.updatedAt,

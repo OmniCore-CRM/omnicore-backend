@@ -1,6 +1,68 @@
 import { z } from "zod";
 
 const companySlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const hostnameLabelPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+const isIpv4 = (value: string) => {
+  const parts = value.split(".");
+  if (parts.length !== 4) return false;
+
+  return parts.every((part) => {
+    if (!/^\d+$/.test(part)) return false;
+    const number = Number(part);
+    return number >= 0 && number <= 255;
+  });
+};
+
+const customSupportDomainSchema = z
+  .string()
+  .trim()
+  .max(255, "Custom domain must be at most 255 characters")
+  .superRefine((value, ctx) => {
+    if (!value) return;
+
+    if (value.includes("://")) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom domain must not include a protocol",
+      });
+      return;
+    }
+
+    if (value.includes("/")) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom domain must not include a path",
+      });
+      return;
+    }
+
+    if (value !== value.toLowerCase()) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom domain must be lowercase",
+      });
+      return;
+    }
+
+    if (value === "localhost" || value.endsWith(".localhost") || isIpv4(value)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom domain must be a public hostname",
+      });
+      return;
+    }
+
+    const labels = value.split(".");
+    if (labels.length < 2 || labels.some((label) => !hostnameLabelPattern.test(label))) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Custom domain must be a valid hostname",
+      });
+    }
+  })
+  .nullable()
+  .optional();
 
 export const companyPortalSettingsUpdateSchema = z.object({
   companySlug: z
@@ -15,6 +77,7 @@ export const companyPortalSettingsUpdateSchema = z.object({
     .nullable()
     .optional(),
   supportPortalEnabled: z.boolean().optional(),
+  customSupportDomain: customSupportDomainSchema,
 });
 
 export type CompanyPortalSettingsUpdateInput = z.infer<
