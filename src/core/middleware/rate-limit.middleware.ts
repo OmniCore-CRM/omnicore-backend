@@ -84,9 +84,12 @@ export const rateLimit =
           Math.ceil((current.resetAt - now) / 1000)
         );
 
+        const requestId = (req as Request & { requestId?: string }).requestId;
+
         return res.status(HTTP_STATUS.TOO_MANY_REQUESTS).json({
           success: false,
           message: "Too many requests",
+          requestId,
         });
       }
     }

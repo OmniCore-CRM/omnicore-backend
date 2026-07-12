@@ -18,7 +18,7 @@ const app = express();
 // Express generates ETags after route handlers finish, which made dynamic API
 // 304 responses wait on full database work. Frontend caching handles freshness.
 app.set("etag", false);
-app.set("trust proxy", 1);
+app.set("trust proxy", env.TRUST_PROXY);
 
 // Security middleware
 app.use(
@@ -32,6 +32,15 @@ app.use(
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Authorization",
+      "Content-Type",
+      "X-Requested-With",
+      "X-Widget-Key",
+      "X-Widget-Session",
+    ],
+    maxAge: 600,
 }));
 
 app.use(helmet());

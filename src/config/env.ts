@@ -9,6 +9,25 @@ const parseOrigins = (value: string) =>
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+const parseTrustProxy = (value: string | undefined): boolean | number => {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized || normalized === "false" || normalized === "off") {
+    return false;
+  }
+
+  if (normalized === "true" || normalized === "on") {
+    return true;
+  }
+
+  const asNumber = Number(normalized);
+  if (Number.isInteger(asNumber) && asNumber >= 0) {
+    return asNumber;
+  }
+
+  return false;
+};
+
 const envSchema = z.object({
   PORT: z.string().default("5001"),
   NODE_ENV: z
@@ -19,6 +38,7 @@ const envSchema = z.object({
 
   APP_ORIGINS: z.string().default("http://localhost:3000"),
   SOCKET_ORIGINS: z.string().optional(),
+  TRUST_PROXY: z.string().optional(),
   JSON_BODY_LIMIT: z.string().default("1mb"),
   ATTACHMENT_STORAGE_DIR: z.string().default("storage/attachments"),
   ATTACHMENT_MAX_FILE_SIZE_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
@@ -136,6 +156,7 @@ export const env = {
   SOCKET_ORIGINS: parseOrigins(
     rawEnv.SOCKET_ORIGINS || rawEnv.APP_ORIGINS
   ),
+  TRUST_PROXY: parseTrustProxy(rawEnv.TRUST_PROXY),
   ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT:
     rawEnv.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT === "true",
 };
