@@ -11,6 +11,7 @@ import { WebhookReplayService } from "./webhook-replay.service.js";
 import { WebhookProvider } from "@prisma/client";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { ChannelReconciliationService } from "./channel-reconciliation.service.js";
+import type { ChannelDeliveryEvent } from "./channel.types.js";
 
 type RawBodyRequest = Request & {
   rawBody?: Buffer;
@@ -136,15 +137,41 @@ export class ChannelController {
         throw error;
       }
 
-      // Extract WhatsApp webhook payload safely
-      const entry = req.body?.entry?.[0];
-      const change = entry?.changes?.[0];
-      const value = change?.value;
-      const providerAccountId = value?.metadata?.phone_number_id;
-      const incomingMessage = value?.messages?.[0];
-      const statusReceipt = value?.statuses?.[0];
+      const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
+      const changeEnvelope: Array<{
+        providerAccountId?: string;
+        value: Record<string, unknown>;
+      }> = [];
 
-      if (!statusReceipt && !incomingMessage) {
+      for (const entry of entries) {
+        const changes = Array.isArray((entry as Record<string, unknown>)?.changes)
+          ? ((entry as Record<string, unknown>).changes as Array<Record<string, unknown>>)
+          : [];
+
+        for (const change of changes) {
+          const value =
+            change && typeof change.value === "object" && change.value
+              ? (change.value as Record<string, unknown>)
+              : null;
+
+          if (!value) continue;
+
+          const metadata =
+            value.metadata && typeof value.metadata === "object"
+              ? (value.metadata as Record<string, unknown>)
+              : null;
+
+          changeEnvelope.push({
+            providerAccountId:
+              typeof metadata?.phone_number_id === "string"
+                ? metadata.phone_number_id
+                : undefined,
+            value,
+          });
+        }
+      }
+
+      if (changeEnvelope.length === 0) {
         await WebhookReplayService.recordSecurityEvent({
           provider: WebhookProvider.WHATSAPP,
           eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
@@ -153,43 +180,7 @@ export class ChannelController {
           payloadFingerprintSource: security.rawPayload,
           reason: "unsupported_payload_shape",
         });
-      }
 
-      if (statusReceipt) {
-        const normalizedStatus = normalizeWhatsAppStatus({
-          ...statusReceipt,
-          providerAccountId,
-        });
-
-        if (normalizedStatus) {
-          await ChannelService.processDeliveryEvent(normalizedStatus, {
-            requestId: security.requestId,
-            signatureFingerprint: security.signatureFingerprint,
-            rawPayload: security.rawPayload,
-          });
-        } else {
-          await WebhookReplayService.recordSecurityEvent({
-            provider: WebhookProvider.WHATSAPP,
-            eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
-            requestId: security.requestId,
-            signatureFingerprint: security.signatureFingerprint,
-            payloadFingerprintSource: security.rawPayload,
-            reason: "invalid_status_payload",
-            metadata: {
-              providerAccountId,
-            },
-          });
-        }
-
-        return sendResponse({
-          res,
-          statusCode: HTTP_STATUS.OK,
-          message: "Webhook status event received successfully",
-        });
-      }
-
-      // Ignore webhook if no inbound message exists
-      if (!incomingMessage) {
         return sendResponse({
           res,
           statusCode: HTTP_STATUS.OK,
@@ -197,25 +188,110 @@ export class ChannelController {
         });
       }
 
-      // Normalize real WhatsApp webhook payload
-      const normalizedMessage = normalizeWhatsAppMessage({
-        messageId: incomingMessage.id,
-        providerAccountId,
-        from: incomingMessage.from,
-        customerName:
-          value?.contacts?.[0]?.profile?.name ||
-          "WhatsApp Customer",
+      const statusEvents: ChannelDeliveryEvent[] = [];
+      const messageEvents: Array<ReturnType<typeof normalizeWhatsAppMessage>> = [];
 
-        content: incomingMessage.text?.body || "",
-        timestamp: incomingMessage.timestamp,
-      });
+      for (const envelope of changeEnvelope) {
+        const statuses = Array.isArray(envelope.value.statuses)
+          ? (envelope.value.statuses as Array<Record<string, unknown>>)
+          : [];
 
-      // Process normalized CRM message
-      await ChannelService.processIncomingMessage(normalizedMessage, {
-        requestId: security.requestId,
-        signatureFingerprint: security.signatureFingerprint,
-        rawPayload: security.rawPayload,
-      });
+        for (const status of statuses) {
+          const normalizedStatus = normalizeWhatsAppStatus({
+            ...status,
+            providerAccountId: envelope.providerAccountId,
+          });
+
+          if (normalizedStatus) {
+            statusEvents.push(normalizedStatus);
+          } else {
+            await WebhookReplayService.recordSecurityEvent({
+              provider: WebhookProvider.WHATSAPP,
+              eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
+              requestId: security.requestId,
+              signatureFingerprint: security.signatureFingerprint,
+              payloadFingerprintSource: security.rawPayload,
+              reason: "invalid_status_payload",
+              metadata: {
+                providerAccountId: envelope.providerAccountId,
+              },
+            });
+          }
+        }
+
+        const incomingMessages = Array.isArray(envelope.value.messages)
+          ? (envelope.value.messages as Array<Record<string, unknown>>)
+          : [];
+
+        const contacts = Array.isArray(envelope.value.contacts)
+          ? (envelope.value.contacts as Array<Record<string, unknown>>)
+          : [];
+
+        const customerName =
+          typeof (contacts[0]?.profile as Record<string, unknown> | undefined)?.name === "string"
+            ? String((contacts[0]?.profile as Record<string, unknown>).name)
+            : "WhatsApp Customer";
+
+        for (const incomingMessage of incomingMessages) {
+          if (typeof incomingMessage.id !== "string" || typeof incomingMessage.from !== "string") {
+            await WebhookReplayService.recordSecurityEvent({
+              provider: WebhookProvider.WHATSAPP,
+              eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
+              requestId: security.requestId,
+              signatureFingerprint: security.signatureFingerprint,
+              payloadFingerprintSource: security.rawPayload,
+              reason: "invalid_message_payload",
+              metadata: {
+                providerAccountId: envelope.providerAccountId,
+              },
+            });
+            continue;
+          }
+
+          messageEvents.push(
+            normalizeWhatsAppMessage({
+              messageId: incomingMessage.id,
+              providerAccountId: envelope.providerAccountId,
+              from: incomingMessage.from,
+              customerName,
+              content:
+                typeof (incomingMessage.text as Record<string, unknown> | undefined)?.body === "string"
+                  ? String((incomingMessage.text as Record<string, unknown>).body)
+                  : "",
+              timestamp:
+                typeof incomingMessage.timestamp === "string"
+                  ? incomingMessage.timestamp
+                  : String(Math.floor(Date.now() / 1000)),
+            })
+          );
+        }
+      }
+
+      statusEvents.sort((a, b) =>
+        String(a.timestamp).localeCompare(String(b.timestamp)) ||
+        a.externalMessageId.localeCompare(b.externalMessageId)
+      );
+
+      for (const status of statusEvents) {
+        await ChannelService.processDeliveryEvent(status, {
+          requestId: security.requestId,
+          signatureFingerprint: security.signatureFingerprint,
+          rawPayload: security.rawPayload,
+        });
+      }
+
+      messageEvents.sort((a, b) =>
+        String(a.timestamp).localeCompare(String(b.timestamp)) ||
+        a.externalMessageId.localeCompare(b.externalMessageId)
+      );
+
+      for (const message of messageEvents) {
+        await ChannelService.processIncomingMessage(message, {
+          requestId: security.requestId,
+          signatureFingerprint: security.signatureFingerprint,
+          rawPayload: security.rawPayload,
+        });
+      }
 
       // TODO
       // Normalize provider payload
@@ -227,7 +303,10 @@ export class ChannelController {
       return sendResponse({
         res,
         statusCode: HTTP_STATUS.OK,
-        message: "Webhook event received successfully",
+        message:
+          statusEvents.length > 0 && messageEvents.length === 0
+            ? "Webhook status event received successfully"
+            : "Webhook event received successfully",
       });
     }
   );

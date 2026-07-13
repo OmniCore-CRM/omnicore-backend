@@ -33,11 +33,44 @@ import type {
 type UserContext = { userId: string; companyId: string; role: string };
 type InboundEmail = {
   externalMessageId: string;
+  providerEventId?: string;
   fromEmail: string;
   fromName?: string;
   toEmail: string;
   subject: string;
   content: string;
+  inReplyTo?: string;
+  references?: string[];
+  threadId?: string;
+  headerMessageId?: string;
+};
+
+type EmailLifecycleStatus =
+  | "DELIVERED"
+  | "BOUNCED"
+  | "COMPLAINED"
+  | "DEFERRED"
+  | "FAILED";
+
+type EmailStatusEvent = {
+  providerEventId?: string;
+  externalMessageId: string;
+  toEmail?: string;
+  status: EmailLifecycleStatus;
+  occurredAt?: string;
+  failureReason?: string;
+};
+
+type ParsedEmailWebhookEvent =
+  | { kind: "inbound"; payload: InboundEmail }
+  | { kind: "status"; payload: EmailStatusEvent };
+
+const emailMessageStatusRank: Record<MessageStatus, number> = {
+  PENDING: 0,
+  SENT: 1,
+  DELIVERED: 2,
+  READ: 3,
+  FAILED: 4,
 };
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
@@ -59,10 +92,73 @@ const extractName = (value: unknown) => {
   return value.slice(0, value.indexOf("<")).trim().replace(/^"|"$/g, "") || undefined;
 };
 
+const normalizeHeaderMessageId = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^<|>$/g, "").trim() || null;
+};
+
+const extractHeaderValue = (headers: unknown, key: string) => {
+  if (!headers) return null;
+
+  const normalizedKey = key.toLowerCase();
+
+  if (Array.isArray(headers)) {
+    for (const item of headers) {
+      if (!item || typeof item !== "object") continue;
+      const entry = item as Record<string, unknown>;
+      const itemKey = String(entry.name ?? entry.key ?? "").toLowerCase();
+      if (itemKey === normalizedKey) {
+        return normalizeHeaderMessageId(entry.value);
+      }
+    }
+
+    return null;
+  }
+
+  if (typeof headers === "object") {
+    const map = headers as Record<string, unknown>;
+    const direct = Object.keys(map).find(
+      (candidate) => candidate.toLowerCase() === normalizedKey
+    );
+
+    if (direct) {
+      return normalizeHeaderMessageId(map[direct]);
+    }
+  }
+
+  return null;
+};
+
+const extractReferences = (headers: unknown) => {
+  const value = extractHeaderValue(headers, "references");
+  if (!value) return [];
+
+  return value
+    .split(/\s+/)
+    .map((part) => normalizeHeaderMessageId(part))
+    .filter((part): part is string => Boolean(part));
+};
+
+const mapLifecycleToMessageStatus = (status: EmailLifecycleStatus): MessageStatus => {
+  switch (status) {
+    case "DELIVERED":
+      return MessageStatus.DELIVERED;
+    case "DEFERRED":
+      return MessageStatus.PENDING;
+    case "BOUNCED":
+    case "COMPLAINED":
+    case "FAILED":
+      return MessageStatus.FAILED;
+  }
+};
+
 const parseInboundEmail = (payload: unknown): InboundEmail => {
   const root = payload as Record<string, unknown>;
   const allowDevelopmentPayload =
-    env.NODE_ENV === "development" ||
+    (env.NODE_ENV === "development" &&
+      env.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT) ||
     env.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT;
 
   if (
@@ -84,6 +180,10 @@ const parseInboundEmail = (payload: unknown): InboundEmail => {
         typeof root.externalMessageId === "string" && root.externalMessageId.trim()
           ? root.externalMessageId.trim()
           : `dev-email-${Date.now()}`,
+      providerEventId:
+        typeof root.eventId === "string" && root.eventId.trim()
+          ? root.eventId.trim()
+          : undefined,
       fromEmail,
       fromName: typeof root.fromName === "string" ? root.fromName.trim() : undefined,
       toEmail,
@@ -92,6 +192,23 @@ const parseInboundEmail = (payload: unknown): InboundEmail => {
           ? root.subject.trim().slice(0, 500)
           : "Local email test",
       content: content.slice(0, 5000),
+      inReplyTo:
+        typeof root.inReplyTo === "string"
+          ? normalizeHeaderMessageId(root.inReplyTo) ?? undefined
+          : undefined,
+      references: Array.isArray(root.references)
+        ? root.references
+            .map((entry) => normalizeHeaderMessageId(entry))
+            .filter((entry): entry is string => Boolean(entry))
+        : undefined,
+      threadId:
+        typeof root.threadId === "string" && root.threadId.trim()
+          ? root.threadId.trim()
+          : undefined,
+      headerMessageId:
+        typeof root.headerMessageId === "string"
+          ? normalizeHeaderMessageId(root.headerMessageId) ?? undefined
+          : undefined,
     };
   }
 
@@ -117,17 +234,141 @@ const parseInboundEmail = (payload: unknown): InboundEmail => {
     typeof data?.subject === "string" && data.subject.trim()
       ? data.subject.trim().slice(0, 500)
       : "Email support request";
+  const headers = data?.headers;
+  const inReplyTo =
+    extractHeaderValue(headers, "in-reply-to") ||
+    normalizeHeaderMessageId(data?.in_reply_to) ||
+    normalizeHeaderMessageId(data?.inReplyTo);
+  const references = [
+    ...extractReferences(headers),
+    ...(Array.isArray(data?.references)
+      ? data.references
+          .map((item) => normalizeHeaderMessageId(item))
+          .filter((item): item is string => Boolean(item))
+      : []),
+  ];
+  const threadId =
+    typeof data?.thread_id === "string" && data.thread_id.trim()
+      ? data.thread_id.trim()
+      : typeof data?.threadId === "string" && data.threadId.trim()
+        ? data.threadId.trim()
+        : undefined;
+  const headerMessageId =
+    extractHeaderValue(headers, "message-id") ||
+    normalizeHeaderMessageId(data?.message_id) ||
+    normalizeHeaderMessageId(data?.messageId);
+  const providerEventId =
+    typeof root?.id === "string"
+      ? root.id
+      : typeof data?.event_id === "string"
+        ? data.event_id
+        : typeof data?.eventId === "string"
+          ? data.eventId
+          : undefined;
 
   if (!fromEmail || !toEmail || !externalMessageId || !content) {
     throw new AppError("Unsupported email webhook payload", HTTP_STATUS.BAD_REQUEST);
   }
+
   return {
     externalMessageId,
+    providerEventId,
     fromEmail,
     fromName: extractName(data?.from),
     toEmail,
     subject,
     content: content.slice(0, 5000),
+    inReplyTo: inReplyTo ?? undefined,
+    references,
+    threadId,
+    headerMessageId: headerMessageId ?? undefined,
+  };
+};
+
+const parseEmailStatusEvent = (payload: unknown): EmailStatusEvent | null => {
+  const root = payload as Record<string, unknown>;
+  const data =
+    root && typeof root.data === "object" && root.data
+      ? (root.data as Record<string, unknown>)
+      : root;
+
+  const rawType = String(root?.type ?? data?.type ?? "").toLowerCase();
+  const normalized = rawType
+    .replace(/^email\./, "")
+    .replace(/^resend\.email\./, "")
+    .replace(/^event\./, "")
+    .trim();
+
+  const map: Record<string, EmailLifecycleStatus> = {
+    delivered: "DELIVERED",
+    bounced: "BOUNCED",
+    complained: "COMPLAINED",
+    complaint: "COMPLAINED",
+    deferred: "DEFERRED",
+    failed: "FAILED",
+  };
+
+  const lifecycle =
+    map[normalized] ||
+    map[String(data?.status ?? "").toLowerCase()] ||
+    map[String(data?.event ?? "").toLowerCase()];
+
+  if (!lifecycle) {
+    return null;
+  }
+
+  const externalMessageId =
+    typeof data?.email_id === "string"
+      ? data.email_id
+      : typeof data?.id === "string"
+        ? data.id
+        : typeof data?.message_id === "string"
+          ? data.message_id
+          : null;
+
+  if (!externalMessageId) {
+    throw new AppError("Unsupported email status payload", HTTP_STATUS.BAD_REQUEST);
+  }
+
+  const toEmail = extractAddress(Array.isArray(data?.to) ? data.to[0] : data?.to);
+
+  return {
+    providerEventId:
+      typeof root?.id === "string"
+        ? root.id
+        : typeof data?.event_id === "string"
+          ? data.event_id
+          : undefined,
+    externalMessageId,
+    toEmail: toEmail ?? undefined,
+    status: lifecycle,
+    occurredAt:
+      typeof data?.created_at === "string"
+        ? data.created_at
+        : typeof data?.timestamp === "string"
+          ? data.timestamp
+          : undefined,
+    failureReason:
+      typeof data?.reason === "string"
+        ? data.reason
+        : typeof data?.failure_reason === "string"
+          ? data.failure_reason
+          : undefined,
+  };
+};
+
+const parseEmailWebhookEvent = (payload: unknown): ParsedEmailWebhookEvent => {
+  const status = parseEmailStatusEvent(payload);
+  if (status) {
+    return {
+      kind: "status",
+      payload: status,
+    };
+  }
+
+  return {
+    kind: "inbound",
+    payload: parseInboundEmail(payload),
   };
 };
 
@@ -278,9 +519,15 @@ export class EmailService {
   }
 
   static async processWebhook(payload: unknown) {
-    const email = parseInboundEmail(payload);
+    const parsed = parseEmailWebhookEvent(payload);
     const payloadText = JSON.stringify(payload);
     const payloadFingerprint = WebhookReplayService.payloadFingerprint(payloadText);
+
+    if (parsed.kind === "status") {
+      return this.processStatusWebhook(parsed.payload, payloadText, payloadFingerprint);
+    }
+
+    const email = parsed.payload;
 
     const account = await prisma.emailAccount.findFirst({
       where: {
@@ -308,7 +555,7 @@ export class EmailService {
     const replayClaim = await WebhookReplayService.claimEvent({
       provider: WebhookProvider.EMAIL,
       eventType: "MESSAGE_RECEIVED",
-      providerEventId: email.externalMessageId,
+      providerEventId: email.providerEventId ?? email.externalMessageId,
       companyId: account.companyId,
       payloadFingerprintSource: payloadText,
       reason: "email_webhook_ingestion",
@@ -366,6 +613,38 @@ export class EmailService {
           channel: ConversationChannel.EMAIL,
         },
       });
+
+      const threadCandidates = [
+        email.inReplyTo,
+        ...(email.references ?? []),
+      ].filter((candidate): candidate is string => Boolean(candidate));
+
+      if (threadCandidates.length > 0) {
+        const threadedMessage = await tx.message.findFirst({
+          where: {
+            companyId: account.companyId,
+            provider: ConversationChannel.EMAIL,
+            externalMessageId: {
+              in: threadCandidates,
+            },
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: {
+            conversationId: true,
+          },
+        });
+
+        if (threadedMessage) {
+          conversation =
+            (await tx.conversation.findFirst({
+              where: {
+                id: threadedMessage.conversationId,
+                companyId: account.companyId,
+              },
+            })) ?? conversation;
+        }
+      }
+
       if (!conversation) {
         conversation = await tx.conversation.create({
           data: {
@@ -396,6 +675,10 @@ export class EmailService {
             subject: email.subject,
             from: email.fromEmail,
             to: [email.toEmail],
+            inReplyTo: email.inReplyTo ?? null,
+            references: email.references ?? [],
+            threadId: email.threadId ?? null,
+            headerMessageId: email.headerMessageId ?? null,
           },
         },
       });
@@ -456,6 +739,142 @@ export class EmailService {
       },
     });
     return mapMessage(result.message);
+  }
+
+  static async processStatusWebhook(
+    event: EmailStatusEvent,
+    payloadText: string,
+    payloadFingerprint: string
+  ) {
+    const message = await prisma.message.findFirst({
+      where: {
+        provider: ConversationChannel.EMAIL,
+        externalMessageId: event.externalMessageId,
+      },
+      select: {
+        id: true,
+        companyId: true,
+        status: true,
+        conversationId: true,
+      },
+    });
+
+    if (!message) {
+      await ChannelReliabilityService.moveToDlq({
+        provider: ConversationChannel.EMAIL,
+        reason: ChannelDlqReason.DELIVERY_UNMATCHED,
+        sourceEventType: "EMAIL_STATUS_EVENT",
+        payload: ChannelReliabilityService.toJsonValue({
+          externalMessageId: event.externalMessageId,
+          providerEventId: event.providerEventId,
+          status: event.status,
+          occurredAt: event.occurredAt,
+          toEmail: event.toEmail,
+          failureReason: event.failureReason,
+        }),
+        externalMessageId: event.externalMessageId,
+        failureCode: "EMAIL_STATUS_UNMATCHED",
+        failureReason: "email_status_without_message",
+      });
+
+      await WebhookReplayService.recordSecurityEvent({
+        provider: WebhookProvider.EMAIL,
+        eventType: "SECURITY_INVALID_TENANT_RESOLUTION",
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        payloadFingerprintSource: payloadText,
+        reason: "email_status_without_message",
+        metadata: {
+          status: event.status,
+          toEmail: event.toEmail,
+        },
+      });
+
+      return null;
+    }
+
+    const replayClaim = await WebhookReplayService.claimEvent({
+      provider: WebhookProvider.EMAIL,
+      eventType: `STATUS_${event.status}`,
+      providerEventId:
+        event.providerEventId ||
+        `${event.externalMessageId}:${event.status}:${event.occurredAt ?? "unknown"}`,
+      companyId: message.companyId,
+      payloadFingerprintSource: payloadText,
+      reason: "email_status_ingestion",
+      metadata: {
+        externalMessageId: event.externalMessageId,
+        status: event.status,
+      },
+    });
+
+    if (!replayClaim.accepted) {
+      return null;
+    }
+
+    const nextStatus = mapLifecycleToMessageStatus(event.status);
+
+    if (emailMessageStatusRank[nextStatus] < emailMessageStatusRank[message.status]) {
+      await ChannelReliabilityService.moveToDlq({
+        companyId: message.companyId,
+        provider: ConversationChannel.EMAIL,
+        reason: ChannelDlqReason.INVALID_LIFECYCLE_TRANSITION,
+        sourceEventType: "EMAIL_STATUS_EVENT",
+        payload: ChannelReliabilityService.toJsonValue({
+          messageId: message.id,
+          externalMessageId: event.externalMessageId,
+          fromStatus: message.status,
+          toStatus: nextStatus,
+          providerStatus: event.status,
+          providerEventId: event.providerEventId,
+        }),
+        messageId: message.id,
+        externalMessageId: event.externalMessageId,
+        failureCode: "EMAIL_STATUS_REGRESSION",
+        failureReason: "email_status_regression_detected",
+      });
+
+      await AuditLogService.record({
+        companyId: message.companyId,
+        action: "EMAIL_STATUS_INVALID_TRANSITION",
+        entityType: "MESSAGE",
+        entityId: message.id,
+        metadata: {
+          from: message.status,
+          to: nextStatus,
+          providerStatus: event.status,
+          externalMessageId: event.externalMessageId,
+        },
+      });
+
+      return null;
+    }
+
+    const updated = await prisma.message.update({
+      where: {
+        id: message.id,
+      },
+      data: {
+        status: nextStatus,
+      },
+    });
+
+    await AuditLogService.record({
+      companyId: message.companyId,
+      action: "EMAIL_STATUS_UPDATED",
+      entityType: "MESSAGE",
+      entityId: updated.id,
+      metadata: {
+        conversationId: updated.conversationId,
+        externalMessageId: event.externalMessageId,
+        providerEventId: event.providerEventId,
+        from: message.status,
+        to: nextStatus,
+        providerStatus: event.status,
+      },
+    });
+
+    emitMessageStatus(updated);
+    return mapMessage(updated);
   }
 
   static async sendOutboundMessage(input: {
