@@ -169,6 +169,15 @@ const envSchema = z.object({
       message: "EMAIL_WEBHOOK_SECRET is required when EMAIL_PROVIDER is configured",
     });
   }
+
+  if (value.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT === "true") {
+    ctx.addIssue({
+      code: "custom",
+      path: ["ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT"],
+      message:
+        "ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT is only permitted in local development",
+    });
+  }
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

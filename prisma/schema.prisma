@@ -136,6 +136,11 @@ enum EmailAccountStatus {
   DISABLED
 }
 
+enum WebhookProvider {
+  WHATSAPP
+  EMAIL
+}
+
 enum ProviderAccountStatus {
   ACTIVE
   DISABLED
@@ -209,6 +214,7 @@ model Company {
   assignmentRules         AssignmentRule[]
   emailAccounts           EmailAccount[]
   whatsAppAccounts        WhatsAppAccount[]
+  webhookReplayLedger     WebhookReplayLedger[]
   authSessions            AuthSession[]
   userInviteTokens        UserInviteToken[]
   notifications           Notification[]
@@ -582,6 +588,35 @@ model EmailAccount {
 
   @@unique([provider, fromEmail])
   @@index([companyId, status])
+}
+
+model WebhookReplayLedger {
+  id String @id @default(cuid())
+
+  provider WebhookProvider
+  eventType String
+  identityKey String @unique
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  providerEventId       String?
+  signatureFingerprint  String?
+  payloadFingerprint    String
+  firstSeenAt           DateTime @default(now())
+  lastSeenAt            DateTime @default(now())
+  firstRequestId        String?
+  lastRequestId         String?
+  seenCount             Int      @default(1)
+  lastReason            String?
+  metadata              Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([provider, companyId, eventType])
+  @@index([provider, providerEventId])
+  @@index([companyId, updatedAt])
 }
 
 model Ticket {

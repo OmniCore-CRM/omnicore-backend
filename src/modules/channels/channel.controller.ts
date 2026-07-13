@@ -7,6 +7,8 @@ import { ChannelService } from "./channel.service.js";
 import { normalizeWhatsAppMessage, normalizeWhatsAppStatus } from "./channel.normalizers.js";
 import { env } from "@/config/env.js";
 import { AppError } from "@/core/errors/app-error.js";
+import { WebhookReplayService } from "./webhook-replay.service.js";
+import { WebhookProvider } from "@prisma/client";
 
 type RawBodyRequest = Request & {
   rawBody?: Buffer;
@@ -56,6 +58,21 @@ const verifyMetaSignature = (req: RawBodyRequest) => {
   }
 };
 
+const webhookSecurityContext = (req: RawBodyRequest) => {
+  const signatureHeader = req.get("x-hub-signature-256");
+  const rawPayload = req.rawBody?.toString("utf8") ?? "";
+  const payloadFingerprint = WebhookReplayService.payloadFingerprint(rawPayload);
+
+  return {
+    requestId: (req as RawBodyRequest & { requestId?: string }).requestId,
+    rawPayload,
+    signatureFingerprint:
+      WebhookReplayService.signatureFingerprint(signatureHeader),
+    payloadFingerprint,
+    signaturePresent: Boolean(signatureHeader),
+  };
+};
+
 export class ChannelController {
   // ===== Webhook verification =====
   static verifyWebhook = asyncHandler(
@@ -84,7 +101,25 @@ export class ChannelController {
   static receiveWebhook = asyncHandler(
     
     async (req: RawBodyRequest, res: Response) => {
-      verifyMetaSignature(req);
+      const security = webhookSecurityContext(req);
+
+      try {
+        verifyMetaSignature(req);
+      } catch (error) {
+        await WebhookReplayService.recordSecurityEvent({
+          provider: WebhookProvider.WHATSAPP,
+          eventType: "SECURITY_SIGNATURE_FAILED",
+          requestId: security.requestId,
+          signatureFingerprint: security.signatureFingerprint,
+          payloadFingerprintSource: security.rawPayload,
+          reason:
+            error instanceof AppError ? error.message : "signature_verification_failed",
+          metadata: {
+            signaturePresent: security.signaturePresent,
+          },
+        });
+        throw error;
+      }
 
       // Extract WhatsApp webhook payload safely
       const entry = req.body?.entry?.[0];
@@ -94,6 +129,17 @@ export class ChannelController {
       const incomingMessage = value?.messages?.[0];
       const statusReceipt = value?.statuses?.[0];
 
+      if (!statusReceipt && !incomingMessage) {
+        await WebhookReplayService.recordSecurityEvent({
+          provider: WebhookProvider.WHATSAPP,
+          eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
+          requestId: security.requestId,
+          signatureFingerprint: security.signatureFingerprint,
+          payloadFingerprintSource: security.rawPayload,
+          reason: "unsupported_payload_shape",
+        });
+      }
+
       if (statusReceipt) {
         const normalizedStatus = normalizeWhatsAppStatus({
           ...statusReceipt,
@@ -101,7 +147,23 @@ export class ChannelController {
         });
 
         if (normalizedStatus) {
-          await ChannelService.processDeliveryEvent(normalizedStatus);
+          await ChannelService.processDeliveryEvent(normalizedStatus, {
+            requestId: security.requestId,
+            signatureFingerprint: security.signatureFingerprint,
+            rawPayload: security.rawPayload,
+          });
+        } else {
+          await WebhookReplayService.recordSecurityEvent({
+            provider: WebhookProvider.WHATSAPP,
+            eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
+            requestId: security.requestId,
+            signatureFingerprint: security.signatureFingerprint,
+            payloadFingerprintSource: security.rawPayload,
+            reason: "invalid_status_payload",
+            metadata: {
+              providerAccountId,
+            },
+          });
         }
 
         return sendResponse({
@@ -134,7 +196,11 @@ export class ChannelController {
       });
 
       // Process normalized CRM message
-      await ChannelService.processIncomingMessage(normalizedMessage);
+      await ChannelService.processIncomingMessage(normalizedMessage, {
+        requestId: security.requestId,
+        signatureFingerprint: security.signatureFingerprint,
+        rawPayload: security.rawPayload,
+      });
 
       // TODO
       // Normalize provider payload

@@ -1,5 +1,11 @@
 import type { IncomingChannelMessage, ChannelDeliveryEvent } from "./channel.types.js";
-import { ConversationChannel, MessageSender, MessageStatus, Prisma } from "@prisma/client";
+import {
+  ConversationChannel,
+  MessageSender,
+  MessageStatus,
+  Prisma,
+  WebhookProvider,
+} from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { getIO } from "@/socket/socket.server.js";
 import axios from "axios";
@@ -12,6 +18,7 @@ import { resolveWhatsAppIngestionCompanyId } from "@/core/utils/tenant-resolutio
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { EmailService } from "@/modules/email/email.service.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { WebhookReplayService } from "./webhook-replay.service.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
@@ -88,8 +95,66 @@ const emitMessageStatusUpdated = (message: Awaited<ReturnType<typeof prisma.mess
 
 export class ChannelService {
   // ===== Process inbound provider message =====
-  static async processIncomingMessage(payload: IncomingChannelMessage) {
-    const companyId = await resolveWhatsAppIngestionCompanyId(payload.providerAccountId);
+  static async processIncomingMessage(
+    payload: IncomingChannelMessage,
+    context?: {
+      requestId?: string;
+      signatureFingerprint?: string | null;
+      rawPayload?: string;
+    }
+  ) {
+    let companyId: string;
+
+    try {
+      companyId = await resolveWhatsAppIngestionCompanyId(payload.providerAccountId);
+    } catch (error) {
+      await WebhookReplayService.recordSecurityEvent({
+        provider: WebhookProvider.WHATSAPP,
+        eventType: "SECURITY_INVALID_TENANT_RESOLUTION",
+        providerEventId: payload.externalMessageId,
+        requestId: context?.requestId,
+        signatureFingerprint: context?.signatureFingerprint ?? null,
+        payloadFingerprintSource:
+          context?.rawPayload ??
+          JSON.stringify({
+            externalMessageId: payload.externalMessageId,
+            providerAccountId: payload.providerAccountId,
+            status: null,
+          }),
+        reason:
+          error instanceof AppError ? error.message : "tenant_resolution_failed",
+        metadata: {
+          providerAccountId: payload.providerAccountId,
+        },
+      });
+      throw error;
+    }
+
+    const replayClaim = await WebhookReplayService.claimEvent({
+      provider: WebhookProvider.WHATSAPP,
+      eventType: "MESSAGE_RECEIVED",
+      providerEventId: payload.externalMessageId,
+      companyId,
+      requestId: context?.requestId,
+      signatureFingerprint: context?.signatureFingerprint ?? null,
+      payloadFingerprintSource:
+        context?.rawPayload ??
+        JSON.stringify({
+          externalMessageId: payload.externalMessageId,
+          externalUserId: payload.externalUserId,
+          content: payload.content,
+          timestamp: payload.timestamp,
+          providerAccountId: payload.providerAccountId,
+        }),
+      reason: "message_ingestion",
+      metadata: {
+        providerAccountId: payload.providerAccountId,
+      },
+    });
+
+    if (!replayClaim.accepted) {
+      return;
+    }
 
     const existingMessage = await prisma.message.findFirst({
       where: {
@@ -277,8 +342,66 @@ export class ChannelService {
   }
 
   // ===== Process delivery/read events =====
-  static async processDeliveryEvent(payload: ChannelDeliveryEvent) {
-    const companyId = await resolveWhatsAppIngestionCompanyId(payload.providerAccountId);
+  static async processDeliveryEvent(
+    payload: ChannelDeliveryEvent,
+    context?: {
+      requestId?: string;
+      signatureFingerprint?: string | null;
+      rawPayload?: string;
+    }
+  ) {
+    let companyId: string;
+
+    try {
+      companyId = await resolveWhatsAppIngestionCompanyId(payload.providerAccountId);
+    } catch (error) {
+      await WebhookReplayService.recordSecurityEvent({
+        provider: WebhookProvider.WHATSAPP,
+        eventType: "SECURITY_INVALID_TENANT_RESOLUTION",
+        providerEventId: payload.externalMessageId,
+        requestId: context?.requestId,
+        signatureFingerprint: context?.signatureFingerprint ?? null,
+        payloadFingerprintSource:
+          context?.rawPayload ??
+          JSON.stringify({
+            externalMessageId: payload.externalMessageId,
+            providerAccountId: payload.providerAccountId,
+            status: payload.status,
+          }),
+        reason:
+          error instanceof AppError ? error.message : "tenant_resolution_failed",
+        metadata: {
+          providerAccountId: payload.providerAccountId,
+          status: payload.status,
+        },
+      });
+      throw error;
+    }
+
+    const replayClaim = await WebhookReplayService.claimEvent({
+      provider: WebhookProvider.WHATSAPP,
+      eventType: "DELIVERY_STATUS",
+      providerEventId: payload.externalMessageId,
+      companyId,
+      requestId: context?.requestId,
+      signatureFingerprint: context?.signatureFingerprint ?? null,
+      payloadFingerprintSource:
+        context?.rawPayload ??
+        JSON.stringify({
+          externalMessageId: payload.externalMessageId,
+          status: payload.status,
+          timestamp: payload.timestamp,
+          providerAccountId: payload.providerAccountId,
+        }),
+      reason: "status_ingestion",
+      metadata: {
+        providerAccountId: payload.providerAccountId,
+      },
+    });
+
+    if (!replayClaim.accepted) {
+      return;
+    }
 
     // Find CRM message by provider message ID
     const message = await prisma.message.findFirst({

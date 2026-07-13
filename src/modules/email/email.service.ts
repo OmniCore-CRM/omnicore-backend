@@ -6,6 +6,7 @@ import {
   MessageStatus,
   Prisma,
   UserRole,
+  WebhookProvider,
 } from "@prisma/client";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/config/db.js";
@@ -21,6 +22,7 @@ import { mapConversation } from "@/modules/conversations/conversation.mapper.js"
 import { mapMessage } from "@/modules/messages/message.mapper.js";
 import { getIO } from "@/socket/socket.server.js";
 import { mapEmailAccount, mapEmailAccounts } from "./email.mapper.js";
+import { WebhookReplayService } from "@/modules/channels/webhook-replay.service.js";
 import type {
   CreateEmailAccountInput,
   UpdateEmailAccountInput,
@@ -144,7 +146,12 @@ export class EmailService {
     rawBody?: Buffer;
   }) {
     if (!env.EMAIL_WEBHOOK_SECRET) {
-      if (env.NODE_ENV === "development") return;
+      if (
+        env.NODE_ENV === "development" &&
+        env.ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT
+      ) {
+        return;
+      }
       throw new AppError("Email webhook is not configured", HTTP_STATUS.FORBIDDEN);
     }
 
@@ -270,6 +277,9 @@ export class EmailService {
 
   static async processWebhook(payload: unknown) {
     const email = parseInboundEmail(payload);
+    const payloadText = JSON.stringify(payload);
+    const payloadFingerprint = WebhookReplayService.payloadFingerprint(payloadText);
+
     const account = await prisma.emailAccount.findFirst({
       where: {
         provider: EmailProvider.RESEND,
@@ -277,7 +287,37 @@ export class EmailService {
         status: EmailAccountStatus.ACTIVE,
       },
     });
-    if (!account) throw new AppError("Email channel not found", HTTP_STATUS.NOT_FOUND);
+
+    if (!account) {
+      await WebhookReplayService.recordSecurityEvent({
+        provider: WebhookProvider.EMAIL,
+        eventType: "SECURITY_INVALID_TENANT_RESOLUTION",
+        providerEventId: email.externalMessageId || payloadFingerprint,
+        payloadFingerprintSource: payloadText,
+        reason: "active_email_account_not_found",
+        metadata: {
+          toEmail: email.toEmail,
+          fromEmail: email.fromEmail,
+        },
+      });
+      throw new AppError("Email channel not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    const replayClaim = await WebhookReplayService.claimEvent({
+      provider: WebhookProvider.EMAIL,
+      eventType: "MESSAGE_RECEIVED",
+      providerEventId: email.externalMessageId,
+      companyId: account.companyId,
+      payloadFingerprintSource: payloadText,
+      reason: "email_webhook_ingestion",
+      metadata: {
+        toEmail: email.toEmail,
+      },
+    });
+
+    if (!replayClaim.accepted) {
+      return null;
+    }
 
     const duplicate = await prisma.message.findFirst({
       where: {
@@ -286,7 +326,19 @@ export class EmailService {
         externalMessageId: email.externalMessageId,
       },
     });
-    if (duplicate) return mapMessage(duplicate);
+    if (duplicate) {
+      await AuditLogService.record({
+        companyId: account.companyId,
+        action: "EMAIL_REPLAY_REJECTED",
+        entityType: "WEBHOOK_EVENT",
+        entityId: email.externalMessageId,
+        metadata: {
+          reason: "message_external_id_already_processed",
+          toEmail: email.toEmail,
+        },
+      });
+      return mapMessage(duplicate);
+    }
 
     let isNewConversation = false;
     const result = await prisma.$transaction(async (tx) => {
