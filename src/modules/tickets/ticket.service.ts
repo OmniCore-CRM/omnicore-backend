@@ -2,6 +2,7 @@ import {
   TicketActivityAction,
   TicketPriority,
   TicketStatus,
+  UserLifecycleStatus,
   UserRole,
   type Prisma,
 } from "@prisma/client";
@@ -1012,6 +1013,8 @@ export class TicketService {
         where: {
           id: assigneeId,
           companyId,
+          isActive: true,
+          status: UserLifecycleStatus.ACTIVE,
         },
         select: {
           id: true,
@@ -1020,7 +1023,7 @@ export class TicketService {
 
       if (!assignee) {
         throw new AppError(
-          "Assignee not found",
+          "Active assignee not found",
           HTTP_STATUS.NOT_FOUND
         );
       }

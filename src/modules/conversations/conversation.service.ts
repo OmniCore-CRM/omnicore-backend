@@ -3,6 +3,7 @@ import {
   ConversationChannel,
   ConversationStatus,
   Prisma,
+  UserLifecycleStatus,
   UserRole,
   type Message,
 } from "@prisma/client";
@@ -864,6 +865,8 @@ export class ConversationService {
       where: {
         id: assigneeId,
         companyId,
+        isActive: true,
+        status: UserLifecycleStatus.ACTIVE,
       },
       select: {
         id: true,
@@ -871,7 +874,7 @@ export class ConversationService {
     });
 
     if (!assignee) {
-      throw new AppError("Assignee not found", HTTP_STATUS.NOT_FOUND);
+      throw new AppError("Active assignee not found", HTTP_STATUS.NOT_FOUND);
     }
 
     return assignee.id;
