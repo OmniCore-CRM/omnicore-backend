@@ -78,6 +78,17 @@ const webhookSecurityContext = (req: RawBodyRequest) => {
 };
 
 export class ChannelController {
+  static providerReadiness = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Channel provider readiness retrieved successfully",
+        data: await ChannelService.getProviderReadiness(req.user!.companyId),
+      });
+    }
+  );
+
   static operationsOverview = asyncHandler(
     async (req: AuthenticatedRequest, res: Response) => {
       return sendResponse({

@@ -68,6 +68,10 @@ export class MessageService {
             conversationId: data.conversationId,
             sender: data.sender,
             content: data.content,
+            metadata:
+              data.metadata === undefined
+                ? undefined
+                : (data.metadata as Prisma.InputJsonValue),
             status:
               (conversation.channel === "WHATSAPP" ||
                 conversation.channel === "EMAIL") &&

@@ -36,6 +36,13 @@ router.post(
 );
 
 router.get(
+  "/readiness",
+  protect,
+  authorize(...RBAC.admin),
+  ChannelController.providerReadiness
+);
+
+router.get(
   "/operations/overview",
   protect,
   authorize(...RBAC.admin),

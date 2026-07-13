@@ -4,6 +4,7 @@ import {
   ChannelDlqReason,
   MessageSender,
   MessageStatus,
+  ProviderAccountStatus,
   Prisma,
   WebhookProvider,
 } from "@prisma/client";
@@ -22,9 +23,96 @@ import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { WebhookReplayService } from "./webhook-replay.service.js";
 import { ChannelReliabilityService } from "./channel-reliability.service.js";
 import { ChannelObservabilityService } from "./channel-observability.service.js";
+import {
+  evidenceSourceFromIds,
+  maskSensitiveId,
+  normalizeE164Phone,
+} from "./provider-evidence.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
+
+const WHATSAPP_SERVICE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+type WhatsAppTemplateInput = {
+  name: string;
+  languageCode?: string;
+  components?: Prisma.InputJsonValue;
+};
+
+type WhatsAppProviderReadiness = {
+  configured: boolean;
+  productionReady: boolean;
+  isTestNumber: boolean;
+  phoneNumberIdHint: string | null;
+  displayPhoneNumber: string | null;
+  verifiedName: string | null;
+  qualityRating: string | null;
+  codeVerificationStatus: string | null;
+  actionableErrors: string[];
+};
+
+const providerReadinessCache = new Map<
+  string,
+  { expiresAt: number; value: WhatsAppProviderReadiness }
+>();
+
+const parseWhatsAppTemplate = (metadata: Prisma.JsonValue | null) => {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const rawTemplate =
+    (metadata as Record<string, unknown>).whatsappTemplate ??
+    (metadata as Record<string, unknown>).template;
+
+  if (!rawTemplate || typeof rawTemplate !== "object" || Array.isArray(rawTemplate)) {
+    return null;
+  }
+
+  const template = rawTemplate as Record<string, unknown>;
+  if (typeof template.name !== "string" || !template.name.trim()) {
+    return null;
+  }
+
+  return {
+    name: template.name.trim(),
+    languageCode:
+      typeof template.languageCode === "string" && template.languageCode.trim()
+        ? template.languageCode.trim()
+        : "en_US",
+    components:
+      Array.isArray(template.components) ||
+      (template.components && typeof template.components === "object")
+        ? (template.components as Prisma.InputJsonValue)
+        : undefined,
+  } satisfies WhatsAppTemplateInput;
+};
+
+const buildTemplatePayload = (template: WhatsAppTemplateInput) => {
+  const payload: {
+    messaging_product: "whatsapp";
+    type: "template";
+    template: {
+      name: string;
+      language: { code: string };
+      components?: Prisma.InputJsonValue;
+    };
+  } = {
+    messaging_product: "whatsapp",
+    type: "template",
+    template: {
+      name: template.name,
+      language: { code: template.languageCode ?? "en_US" },
+    },
+  };
+
+  if (template.components) {
+    payload.template.components = template.components;
+  }
+
+  return payload;
+};
 
 type SafeProviderFailure = {
   provider: "WHATSAPP";
@@ -97,6 +185,127 @@ const emitMessageStatusUpdated = (message: Awaited<ReturnType<typeof prisma.mess
 };
 
 export class ChannelService {
+  static async getProviderReadiness(companyId: string) {
+    return {
+      whatsapp: await this.getWhatsAppProviderReadiness(companyId),
+      email: await EmailService.getProviderReadiness(companyId),
+    };
+  }
+
+  static async getWhatsAppProviderReadiness(
+    companyId: string
+  ): Promise<WhatsAppProviderReadiness> {
+    const cacheKey = `${companyId}:${env.WHATSAPP_PHONE_NUMBER_ID ?? ""}`;
+    const now = Date.now();
+    const cached = providerReadinessCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+
+    const account = await prisma.whatsAppAccount.findFirst({
+      where: { companyId, status: ProviderAccountStatus.ACTIVE },
+      select: { phoneNumberId: true, displayPhoneNumber: true },
+    });
+
+    const errors: string[] = [];
+
+    if (!account) {
+      errors.push("No active WhatsApp account is configured for this company.");
+    }
+
+    if (!env.WHATSAPP_PHONE_NUMBER_ID || !env.WHATSAPP_ACCESS_TOKEN) {
+      errors.push(
+        "WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_ACCESS_TOKEN must be configured in backend environment."
+      );
+    }
+
+    if (
+      account &&
+      env.WHATSAPP_PHONE_NUMBER_ID &&
+      account.phoneNumberId !== env.WHATSAPP_PHONE_NUMBER_ID
+    ) {
+      errors.push(
+        "Configured WhatsApp phone number does not match the active tenant mapping."
+      );
+    }
+
+    let displayPhoneNumber: string | null = account?.displayPhoneNumber ?? null;
+    let verifiedName: string | null = null;
+    let qualityRating: string | null = null;
+    let codeVerificationStatus: string | null = null;
+    let isTestNumber = false;
+
+    if (errors.length === 0 && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_ACCESS_TOKEN) {
+      try {
+        const response = await axios.get(
+          `https://graph.facebook.com/v19.0/${env.WHATSAPP_PHONE_NUMBER_ID}`,
+          {
+            params: {
+              fields:
+                "display_phone_number,verified_name,quality_rating,code_verification_status,name_status,platform_type",
+            },
+            headers: {
+              Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+            },
+          }
+        );
+
+        displayPhoneNumber =
+          typeof response.data?.display_phone_number === "string"
+            ? response.data.display_phone_number
+            : displayPhoneNumber;
+        verifiedName =
+          typeof response.data?.verified_name === "string"
+            ? response.data.verified_name
+            : null;
+        qualityRating =
+          typeof response.data?.quality_rating === "string"
+            ? response.data.quality_rating
+            : null;
+        codeVerificationStatus =
+          typeof response.data?.code_verification_status === "string"
+            ? response.data.code_verification_status
+            : null;
+
+        isTestNumber =
+          (verifiedName?.toLowerCase().includes("test number") ?? false) ||
+          codeVerificationStatus === "NOT_VERIFIED";
+      } catch {
+        errors.push(
+          "Could not verify WhatsApp number readiness from Meta API. Check token scopes and phone-number permissions."
+        );
+      }
+    }
+
+    if (isTestNumber) {
+      errors.push(
+        "Active WhatsApp sender is a Meta test number. It is not production-ready for real delivery proofs."
+      );
+    }
+
+    const productionReady = errors.length === 0 && !isTestNumber;
+
+    const readiness: WhatsAppProviderReadiness = {
+      configured: errors.length === 0,
+      productionReady,
+      isTestNumber,
+      phoneNumberIdHint: maskSensitiveId(env.WHATSAPP_PHONE_NUMBER_ID ?? account?.phoneNumberId),
+      displayPhoneNumber,
+      verifiedName,
+      qualityRating,
+      codeVerificationStatus,
+      actionableErrors: errors,
+    };
+
+    providerReadinessCache.set(cacheKey, {
+      value: readiness,
+      expiresAt: Date.now() + 5 * 60_000,
+    });
+
+    return readiness;
+  }
+
   // ===== Process inbound provider message =====
   static async processIncomingMessage(
     payload: IncomingChannelMessage,
@@ -156,6 +365,22 @@ export class ChannelService {
     });
 
     if (!replayClaim.accepted) {
+      return;
+    }
+
+    const evidenceSource = evidenceSourceFromIds(payload.externalMessageId);
+
+    if (evidenceSource === "SIMULATED") {
+      await AuditLogService.record({
+        companyId,
+        action: "WHATSAPP_SIMULATED_EVENT_IGNORED",
+        entityType: "WEBHOOK_EVENT",
+        entityId: payload.externalMessageId,
+        metadata: {
+          reason: "simulated_evidence",
+          providerAccountId: payload.providerAccountId,
+        },
+      });
       return;
     }
 
@@ -406,6 +631,23 @@ export class ChannelService {
       return;
     }
 
+    const evidenceSource = evidenceSourceFromIds(payload.externalMessageId);
+
+    if (evidenceSource === "SIMULATED") {
+      await AuditLogService.record({
+        companyId,
+        action: "WHATSAPP_SIMULATED_STATUS_IGNORED",
+        entityType: "MESSAGE",
+        entityId: payload.externalMessageId,
+        metadata: {
+          status: payload.status,
+          providerAccountId: payload.providerAccountId,
+          evidenceSource,
+        },
+      });
+      return;
+    }
+
     // Find CRM message by provider message ID
     const message = await prisma.message.findFirst({
       where: {
@@ -535,10 +777,11 @@ export class ChannelService {
   }
 
   // ===== Send outbound provider message =====
-  static async sendOutboundMessage({ messageId, conversationId, content, }: {
+  static async sendOutboundMessage({ messageId, conversationId, content, metadata }: {
     messageId: string;
     conversationId: string;
     content: string;
+    metadata?: Prisma.JsonValue | null;
   }) {
     // Find CRM conversation
     const conversation = await prisma.conversation.findUnique({
@@ -565,6 +808,7 @@ export class ChannelService {
           conversationId,
           customerPhone: conversation.customer.phone || "",
           content,
+          metadata,
         });
 
       case ConversationChannel.EMAIL:
@@ -599,6 +843,7 @@ export class ChannelService {
         content: true,
         provider: true,
         status: true,
+        metadata: true,
       },
     });
 
@@ -636,6 +881,7 @@ export class ChannelService {
         messageId: message.id,
         conversationId: message.conversationId,
         content: message.content,
+        metadata: message.metadata,
       });
 
       await ChannelReliabilityService.markRetrySuccess(message.id, lockToken);
@@ -658,6 +904,7 @@ export class ChannelService {
           conversationId: message.conversationId,
           content: message.content,
           provider: message.provider,
+          metadata: message.metadata,
         },
         failureMeta: ChannelReliabilityService.toJsonValue(
           error instanceof AppError
@@ -682,12 +929,14 @@ export class ChannelService {
     conversationId,
     customerPhone,
     content,
+    metadata,
   }: {
     companyId: string
     messageId: string;
     conversationId: string;
     customerPhone: string;
     content: string;
+    metadata?: Prisma.JsonValue | null;
   }) {
     await ChannelReliabilityService.ensureRetryState({
       companyId,
@@ -733,6 +982,99 @@ export class ChannelService {
       );
     }
 
+    const normalizedRecipient = normalizeE164Phone(customerPhone);
+    if (!normalizedRecipient) {
+      const failedMessage = await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          status: MessageStatus.FAILED,
+          provider: ConversationChannel.WHATSAPP,
+        },
+      });
+
+      emitMessageStatusUpdated(failedMessage);
+
+      throw new AppError(
+        "WhatsApp recipient must be a valid E.164 number",
+        HTTP_STATUS.BAD_REQUEST,
+        {
+          code: "WHATSAPP_INVALID_RECIPIENT",
+          details: {
+            provider: "WHATSAPP",
+          },
+        }
+      );
+    }
+
+    const readiness = await this.getWhatsAppProviderReadiness(companyId);
+
+    if (env.NODE_ENV !== "development" && !readiness.productionReady) {
+      const failedMessage = await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          status: MessageStatus.FAILED,
+          provider: ConversationChannel.WHATSAPP,
+        },
+      });
+
+      emitMessageStatusUpdated(failedMessage);
+
+      throw new AppError(
+        "WhatsApp provider is not production-ready for real delivery",
+        HTTP_STATUS.BAD_GATEWAY,
+        {
+          code: "WHATSAPP_PROVIDER_NOT_READY",
+          details: {
+            provider: "WHATSAPP",
+            actionableErrors: readiness.actionableErrors,
+            isTestNumber: readiness.isTestNumber,
+          },
+        }
+      );
+    }
+
+    const template = parseWhatsAppTemplate(metadata ?? null);
+
+    const latestInboundCustomerMessage = await prisma.message.findFirst({
+      where: {
+        companyId,
+        conversationId,
+        provider: ConversationChannel.WHATSAPP,
+        sender: MessageSender.CUSTOMER,
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { createdAt: true },
+    });
+
+    const customerWindowOpen = latestInboundCustomerMessage
+      ? Date.now() - latestInboundCustomerMessage.createdAt.getTime() <=
+        WHATSAPP_SERVICE_WINDOW_MS
+      : false;
+
+    if (!customerWindowOpen && !template) {
+      const failedMessage = await prisma.message.update({
+        where: { id: messageId },
+        data: {
+          status: MessageStatus.FAILED,
+          provider: ConversationChannel.WHATSAPP,
+        },
+      });
+
+      emitMessageStatusUpdated(failedMessage);
+
+      throw new AppError(
+        "WhatsApp free-form reply is outside the 24-hour customer service window. Send an approved template instead.",
+        HTTP_STATUS.BAD_REQUEST,
+        {
+          code: "WHATSAPP_TEMPLATE_REQUIRED",
+          details: {
+            provider: "WHATSAPP",
+            customerServiceWindowOpen: false,
+          },
+        }
+      );
+    }
+
     // Send outbound message through Meta WhatsApp Cloud API
     let externalMessageId: string;
 
@@ -741,11 +1083,15 @@ export class ChannelService {
         `https://graph.facebook.com/v19.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
         {
           messaging_product: "whatsapp",
-          to: customerPhone,
-          type: "text",
-          text: {
-            body: content,
-          },
+          to: normalizedRecipient,
+          ...(customerWindowOpen || !template
+            ? {
+                type: "text",
+                text: {
+                  body: content,
+                },
+              }
+            : buildTemplatePayload(template)),
         },
 
         {
@@ -839,6 +1185,25 @@ export class ChannelService {
         status: MessageStatus.SENT,
         externalMessageId,
         provider: ConversationChannel.WHATSAPP,
+        metadata:
+          metadata && typeof metadata === "object"
+            ? {
+                ...(metadata as Record<string, unknown>),
+                deliveryEvidenceSource: evidenceSourceFromIds(externalMessageId),
+                deliveryAcceptedAt: new Date().toISOString(),
+                deliveryAcceptanceMode:
+                  customerWindowOpen || !template
+                    ? "FREEFORM"
+                    : "TEMPLATE",
+              }
+            : {
+                deliveryEvidenceSource: evidenceSourceFromIds(externalMessageId),
+                deliveryAcceptedAt: new Date().toISOString(),
+                deliveryAcceptanceMode:
+                  customerWindowOpen || !template
+                    ? "FREEFORM"
+                    : "TEMPLATE",
+              },
       },
     });
 
@@ -850,6 +1215,8 @@ export class ChannelService {
       metadata: {
         conversationId,
         providerMessageId: externalMessageId,
+        evidenceSource: evidenceSourceFromIds(externalMessageId),
+        deliveryStatusSemantics: "ACCEPTED_BY_PROVIDER",
       },
     });
 

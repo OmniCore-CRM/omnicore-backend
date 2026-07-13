@@ -26,6 +26,10 @@ import { mapEmailAccount, mapEmailAccounts } from "./email.mapper.js";
 import { WebhookReplayService } from "@/modules/channels/webhook-replay.service.js";
 import { ChannelReliabilityService } from "@/modules/channels/channel-reliability.service.js";
 import { ChannelObservabilityService } from "@/modules/channels/channel-observability.service.js";
+import {
+  evidenceSourceFromIds,
+  maskSensitiveId,
+} from "@/modules/channels/provider-evidence.js";
 import type {
   CreateEmailAccountInput,
   UpdateEmailAccountInput,
@@ -44,6 +48,7 @@ type InboundEmail = {
   references?: string[];
   threadId?: string;
   headerMessageId?: string;
+  evidenceSource: "PROVIDER" | "SIMULATED";
 };
 
 type EmailLifecycleStatus =
@@ -62,6 +67,23 @@ type EmailStatusEvent = {
   failureReason?: string;
 };
 
+type EmailProviderReadiness = {
+  configured: boolean;
+  productionReady: boolean;
+  senderDomainVerified: boolean;
+  senderDomain: string | null;
+  configuredFromEmail: string | null;
+  verifiedDomains: string[];
+  webhookEndpoint: string | null;
+  webhookEvents: string[];
+  actionableErrors: string[];
+};
+
+const resendReadinessCache = new Map<
+  string,
+  { expiresAt: number; value: EmailProviderReadiness }
+>();
+
 type ParsedEmailWebhookEvent =
   | { kind: "inbound"; payload: InboundEmail }
   | { kind: "status"; payload: EmailStatusEvent };
@@ -75,6 +97,77 @@ const emailMessageStatusRank: Record<MessageStatus, number> = {
 };
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
+
+const emailDomain = (value: string) => normalizeEmail(value).split("@")[1] ?? "";
+
+const parseResendDomainBody = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return [] as Array<Record<string, unknown>>;
+  const root = payload as { data?: unknown };
+  return Array.isArray(root.data)
+    ? (root.data as Array<Record<string, unknown>>)
+    : [];
+};
+
+const parseResendWebhookBody = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return [] as Array<Record<string, unknown>>;
+  const root = payload as { data?: unknown };
+  return Array.isArray(root.data)
+    ? (root.data as Array<Record<string, unknown>>)
+    : [];
+};
+
+const assertResendSenderDomain = async (fromEmail: string) => {
+  if (!env.RESEND_API_KEY) {
+    throw new AppError(
+      "Resend API key is not configured",
+      HTTP_STATUS.BAD_GATEWAY,
+      { code: "EMAIL_PROVIDER_NOT_CONFIGURED" }
+    );
+  }
+
+  const response = await fetch("https://api.resend.com/domains", {
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new AppError(
+      "Could not verify sender domain with Resend",
+      HTTP_STATUS.BAD_GATEWAY,
+      { code: "EMAIL_DOMAIN_VALIDATION_FAILED" }
+    );
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  const domains = parseResendDomainBody(payload);
+  const verifiedDomains = domains
+    .filter((domain) => String(domain.status).toLowerCase() === "verified")
+    .filter(
+      (domain) =>
+        typeof domain.capabilities === "object" &&
+        domain.capabilities &&
+        String((domain.capabilities as Record<string, unknown>).sending).toLowerCase() ===
+          "enabled"
+    )
+    .map((domain) => normalizeEmail(String(domain.name ?? "")))
+    .filter(Boolean);
+
+  const senderDomain = emailDomain(fromEmail);
+  if (!senderDomain || !verifiedDomains.includes(senderDomain)) {
+    throw new AppError(
+      "Email sender must use a verified Resend sending domain",
+      HTTP_STATUS.BAD_REQUEST,
+      {
+        code: "EMAIL_SENDER_DOMAIN_NOT_VERIFIED",
+        details: {
+          senderDomain,
+          verifiedDomains,
+        },
+      }
+    );
+  }
+};
 
 const assertCanManage = (user: UserContext) => {
   if (!hasPermission(user.role as UserRole, Permissions.manageEmailChannels)) {
@@ -210,6 +303,7 @@ const parseInboundEmail = (payload: unknown): InboundEmail => {
         typeof root.headerMessageId === "string"
           ? normalizeHeaderMessageId(root.headerMessageId) ?? undefined
           : undefined,
+      evidenceSource: "SIMULATED",
     };
   }
 
@@ -283,6 +377,7 @@ const parseInboundEmail = (payload: unknown): InboundEmail => {
     references,
     threadId,
     headerMessageId: headerMessageId ?? undefined,
+    evidenceSource: "PROVIDER",
   };
 };
 
@@ -382,6 +477,142 @@ const emitMessageStatus = (
 };
 
 export class EmailService {
+  static async getProviderReadiness(companyId: string): Promise<EmailProviderReadiness> {
+    const cacheKey = `${companyId}:${env.RESEND_API_KEY ? "configured" : "missing"}`;
+    const now = Date.now();
+    const cached = resendReadinessCache.get(cacheKey);
+
+    if (cached && cached.expiresAt > now) {
+      return cached.value;
+    }
+
+    const account = await prisma.emailAccount.findFirst({
+      where: { companyId, status: EmailAccountStatus.ACTIVE },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { fromEmail: true },
+    });
+
+    const errors: string[] = [];
+    const verifiedDomains: string[] = [];
+    let webhookEndpoint: string | null = null;
+    let webhookEvents: string[] = [];
+
+    if (!env.RESEND_API_KEY) {
+      errors.push("RESEND_API_KEY is not configured.");
+    }
+
+    if (!account) {
+      errors.push("No active Email account is configured for this company.");
+    }
+
+    if (env.RESEND_API_KEY) {
+      try {
+        const [domainsResponse, webhooksResponse] = await Promise.all([
+          fetch("https://api.resend.com/domains", {
+            headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
+          }),
+          fetch("https://api.resend.com/webhooks", {
+            headers: { Authorization: `Bearer ${env.RESEND_API_KEY}` },
+          }),
+        ]);
+
+        if (!domainsResponse.ok) {
+          errors.push("Could not read Resend domains.");
+        } else {
+          const domainsPayload = await domainsResponse.json().catch(() => ({}));
+          const domains = parseResendDomainBody(domainsPayload);
+
+          for (const domain of domains) {
+            const name = normalizeEmail(String(domain.name ?? ""));
+            if (!name) continue;
+
+            const isVerified = String(domain.status ?? "").toLowerCase() === "verified";
+            const sendingEnabled =
+              typeof domain.capabilities === "object" &&
+              domain.capabilities &&
+              String((domain.capabilities as Record<string, unknown>).sending).toLowerCase() ===
+                "enabled";
+
+            if (isVerified && sendingEnabled) {
+              verifiedDomains.push(name);
+            }
+          }
+        }
+
+        if (!webhooksResponse.ok) {
+          errors.push("Could not read Resend webhooks.");
+        } else {
+          const webhooksPayload = await webhooksResponse.json().catch(() => ({}));
+          const webhooks = parseResendWebhookBody(webhooksPayload);
+          const enabledWebhook = webhooks.find(
+            (entry) => String(entry.status ?? "").toLowerCase() === "enabled"
+          );
+
+          webhookEndpoint =
+            typeof enabledWebhook?.endpoint === "string"
+              ? String(enabledWebhook.endpoint)
+              : null;
+          webhookEvents = Array.isArray(enabledWebhook?.events)
+            ? enabledWebhook.events
+                .map((event) => String(event))
+                .filter(Boolean)
+            : [];
+        }
+      } catch {
+        errors.push("Could not verify provider readiness from Resend API.");
+      }
+    }
+
+    const configuredFromEmail = account?.fromEmail ?? null;
+    const senderDomain = configuredFromEmail ? emailDomain(configuredFromEmail) : null;
+    const senderDomainVerified = Boolean(
+      senderDomain && verifiedDomains.includes(senderDomain)
+    );
+
+    if (configuredFromEmail && !senderDomainVerified) {
+      errors.push(
+        "Configured sender email is not on a verified Resend sending domain."
+      );
+    }
+
+    const lifecycleEvents = [
+      "email.delivered",
+      "email.bounced",
+      "email.complained",
+      "email.deferred",
+      "email.failed",
+    ];
+
+    const missingLifecycleEvents = lifecycleEvents.filter(
+      (event) => !webhookEvents.includes(event)
+    );
+
+    if (missingLifecycleEvents.length > 0) {
+      errors.push(
+        "Resend webhook is missing lifecycle events required for truthful delivery statuses."
+      );
+    }
+
+    const readiness: EmailProviderReadiness = {
+      configured: errors.length === 0,
+      productionReady: errors.length === 0,
+      senderDomainVerified,
+      senderDomain,
+      configuredFromEmail,
+      verifiedDomains,
+      webhookEndpoint,
+      webhookEvents,
+      actionableErrors: errors,
+    };
+
+    resendReadinessCache.set(cacheKey, {
+      value: readiness,
+      expiresAt: Date.now() + 5 * 60_000,
+    });
+
+    return readiness;
+  }
+
   static verifyWebhookSignature(input: {
     receivedSecret?: string;
     svixId?: string;
@@ -449,11 +680,14 @@ export class EmailService {
 
   static async createAccount(user: UserContext, input: CreateEmailAccountInput) {
     assertCanManage(user);
+    const fromEmail = normalizeEmail(input.fromEmail);
+    await assertResendSenderDomain(fromEmail);
+
     const account = await prisma.emailAccount.create({
       data: {
         companyId: user.companyId,
         provider: input.provider,
-        fromEmail: normalizeEmail(input.fromEmail),
+        fromEmail,
         fromName: input.fromName,
         status: input.status,
       },
@@ -479,11 +713,18 @@ export class EmailService {
       where: { id: accountId, companyId: user.companyId },
     });
     if (!existing) throw new AppError("Email account not found", HTTP_STATUS.NOT_FOUND);
+
+    const nextFromEmail = input.fromEmail
+      ? normalizeEmail(input.fromEmail)
+      : existing.fromEmail;
+
+    await assertResendSenderDomain(nextFromEmail);
+
     const account = await prisma.emailAccount.update({
       where: { id: accountId },
       data: {
         ...input,
-        ...(input.fromEmail ? { fromEmail: normalizeEmail(input.fromEmail) } : {}),
+        ...(input.fromEmail ? { fromEmail: nextFromEmail } : {}),
       },
     });
     await AuditLogService.record({
@@ -576,6 +817,20 @@ export class EmailService {
     });
 
     if (!replayClaim.accepted) {
+      return null;
+    }
+
+    if (email.evidenceSource === "SIMULATED") {
+      await AuditLogService.record({
+        companyId: account.companyId,
+        action: "EMAIL_SIMULATED_EVENT_IGNORED",
+        entityType: "WEBHOOK_EVENT",
+        entityId: email.externalMessageId,
+        metadata: {
+          reason: "simulated_evidence",
+          toEmail: email.toEmail,
+        },
+      });
       return null;
     }
 
@@ -690,6 +945,7 @@ export class EmailService {
             references: email.references ?? [],
             threadId: email.threadId ?? null,
             headerMessageId: email.headerMessageId ?? null,
+            deliveryEvidenceSource: email.evidenceSource,
           },
         },
       });
@@ -841,6 +1097,28 @@ export class EmailService {
       return null;
     }
 
+    const evidenceSource = evidenceSourceFromIds(
+      event.providerEventId,
+      event.externalMessageId
+    );
+
+    if (evidenceSource === "SIMULATED") {
+      await AuditLogService.record({
+        companyId: message.companyId,
+        action: "EMAIL_SIMULATED_STATUS_IGNORED",
+        entityType: "MESSAGE",
+        entityId: message.id,
+        metadata: {
+          providerEventId: event.providerEventId,
+          externalMessageId: event.externalMessageId,
+          providerStatus: event.status,
+          evidenceSource,
+        },
+      });
+
+      return null;
+    }
+
     const nextStatus = mapLifecycleToMessageStatus(event.status);
 
     if (emailMessageStatusRank[nextStatus] < emailMessageStatusRank[message.status]) {
@@ -910,6 +1188,7 @@ export class EmailService {
         from: message.status,
         to: nextStatus,
         providerStatus: event.status,
+        evidenceSource,
       },
     });
 
@@ -1072,6 +1351,9 @@ export class EmailService {
             subject: input.subject || "Re: Support request",
             from: account.fromEmail,
             to: [input.customerEmail],
+            deliveryEvidenceSource: evidenceSourceFromIds(body.id),
+            deliveryAcceptedAt: new Date().toISOString(),
+            deliveryStatusSemantics: "ACCEPTED_BY_PROVIDER",
           },
         },
       });
@@ -1086,6 +1368,8 @@ export class EmailService {
           from: account.fromEmail,
           to: input.customerEmail,
           subject: input.subject || "Re: Support request",
+          evidenceSource: evidenceSourceFromIds(body.id),
+          deliveryStatusSemantics: "ACCEPTED_BY_PROVIDER",
         },
       });
       ChannelObservabilityService.record({

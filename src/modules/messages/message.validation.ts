@@ -13,6 +13,10 @@ export const createMessageSchema = z.object({
     .string()
     .min(1, "Message content is required")
     .max(5000, "Message is too long"),
+
+  metadata: z
+    .record(z.string(), z.unknown())
+    .optional(),
 });
 
 export type CreateMessageInput = z.infer<
