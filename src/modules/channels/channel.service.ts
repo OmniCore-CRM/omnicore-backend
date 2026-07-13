@@ -1,6 +1,7 @@
 import type { IncomingChannelMessage, ChannelDeliveryEvent } from "./channel.types.js";
 import {
   ConversationChannel,
+  ChannelDlqReason,
   MessageSender,
   MessageStatus,
   Prisma,
@@ -19,6 +20,7 @@ import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rul
 import { EmailService } from "@/modules/email/email.service.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { WebhookReplayService } from "./webhook-replay.service.js";
+import { ChannelReliabilityService } from "./channel-reliability.service.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
@@ -414,6 +416,23 @@ export class ChannelService {
 
     // Message may not exist yet
     if (!message) {
+      await ChannelReliabilityService.moveToDlq({
+        companyId,
+        provider: ConversationChannel.WHATSAPP,
+        reason: ChannelDlqReason.DELIVERY_UNMATCHED,
+        sourceEventType: "WHATSAPP_DELIVERY_EVENT",
+        payload: {
+          externalMessageId: payload.externalMessageId,
+          providerAccountId: payload.providerAccountId,
+          status: payload.status,
+          timestamp: payload.timestamp,
+        },
+        externalMessageId: payload.externalMessageId,
+        providerAccountId: payload.providerAccountId,
+        failureCode: "DELIVERY_UNMATCHED",
+        failureReason: "delivery_event_without_message",
+      });
+
       await AuditLogService.record({
         companyId,
         action: "WHATSAPP_DELIVERY_UNMATCHED",
@@ -432,6 +451,26 @@ export class ChannelService {
       messageStatusRank[payload.status] <
       messageStatusRank[message.status]
     ) {
+      await ChannelReliabilityService.moveToDlq({
+        companyId,
+        provider: ConversationChannel.WHATSAPP,
+        reason: ChannelDlqReason.INVALID_LIFECYCLE_TRANSITION,
+        sourceEventType: "WHATSAPP_DELIVERY_EVENT",
+        payload: ChannelReliabilityService.toJsonValue({
+          messageId: message.id,
+          externalMessageId: payload.externalMessageId,
+          fromStatus: message.status,
+          toStatus: payload.status,
+          providerAccountId: payload.providerAccountId,
+          timestamp: payload.timestamp,
+        }),
+        messageId: message.id,
+        externalMessageId: payload.externalMessageId,
+        providerAccountId: payload.providerAccountId,
+        failureCode: "INVALID_LIFECYCLE_TRANSITION",
+        failureReason: "delivery_status_regression_detected",
+      });
+
       return;
     }
 
@@ -511,6 +550,99 @@ export class ChannelService {
     }
   }
 
+  static async retryOutboundMessage(input: {
+    companyId: string;
+    messageId: string;
+    force?: boolean;
+  }) {
+    const message = await prisma.message.findFirst({
+      where: {
+        id: input.messageId,
+        companyId: input.companyId,
+      },
+      select: {
+        id: true,
+        companyId: true,
+        conversationId: true,
+        content: true,
+        provider: true,
+        status: true,
+      },
+    });
+
+    if (!message) {
+      throw new AppError("Message not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (
+      message.provider !== ConversationChannel.WHATSAPP &&
+      message.provider !== ConversationChannel.EMAIL
+    ) {
+      throw new AppError(
+        "Message provider is not retryable",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    await ChannelReliabilityService.ensureRetryState({
+      companyId: message.companyId,
+      messageId: message.id,
+      provider: message.provider,
+    });
+
+    const lockToken = await ChannelReliabilityService.acquireSendLock(
+      message.id,
+      input.force
+    );
+
+    if (!lockToken) {
+      return null;
+    }
+
+    try {
+      const result = await this.sendOutboundMessage({
+        messageId: message.id,
+        conversationId: message.conversationId,
+        content: message.content,
+      });
+
+      await ChannelReliabilityService.markRetrySuccess(message.id, lockToken);
+      return result;
+    } catch (error) {
+      const classification = ChannelReliabilityService.classifyOutboundFailure(
+        message.provider,
+        error
+      );
+
+      await ChannelReliabilityService.handleRetryFailure({
+        companyId: message.companyId,
+        messageId: message.id,
+        provider: message.provider,
+        classification,
+        lockToken,
+        sourceEventType: "OUTBOUND_SEND",
+        payload: {
+          messageId: message.id,
+          conversationId: message.conversationId,
+          content: message.content,
+          provider: message.provider,
+        },
+        failureMeta: ChannelReliabilityService.toJsonValue(
+          error instanceof AppError
+            ? {
+                code: error.code,
+                details: error.details ?? null,
+              }
+            : {
+                message: error instanceof Error ? error.message : "unknown_error",
+              }
+        ),
+      });
+
+      throw error;
+    }
+  }
+
   // ===== Send WhatsApp message =====
   static async sendWhatsAppMessage({
     companyId,
@@ -525,6 +657,12 @@ export class ChannelService {
     customerPhone: string;
     content: string;
   }) {
+    await ChannelReliabilityService.ensureRetryState({
+      companyId,
+      messageId,
+      provider: ConversationChannel.WHATSAPP,
+    });
+
     if (
       !env.WHATSAPP_PHONE_NUMBER_ID ||
       !env.WHATSAPP_ACCESS_TOKEN

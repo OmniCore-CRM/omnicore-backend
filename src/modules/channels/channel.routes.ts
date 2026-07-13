@@ -2,6 +2,8 @@ import { Router } from "express";
 import { ChannelController } from "./channel.controller.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import emailRoutes from "@/modules/email/email.routes.js";
+import { protect } from "@/core/middleware/auth.middleware.js";
+import { authorize, RBAC } from "@/core/middleware/authorize.middleware.js";
 
 const router = Router();
 router.use("/email", emailRoutes);
@@ -24,6 +26,13 @@ router.post(
   "/webhook",
   webhookRateLimit,
   ChannelController.receiveWebhook
+);
+
+router.post(
+  "/reconcile",
+  protect,
+  authorize(...RBAC.admin),
+  ChannelController.reconcileReliability
 );
 
 export default router;

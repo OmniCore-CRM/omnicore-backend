@@ -9,6 +9,8 @@ import { env } from "@/config/env.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { WebhookReplayService } from "./webhook-replay.service.js";
 import { WebhookProvider } from "@prisma/client";
+import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
+import { ChannelReconciliationService } from "./channel-reconciliation.service.js";
 
 type RawBodyRequest = Request & {
   rawBody?: Buffer;
@@ -74,6 +76,19 @@ const webhookSecurityContext = (req: RawBodyRequest) => {
 };
 
 export class ChannelController {
+  static reconcileReliability = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const result = await ChannelReconciliationService.runCompany(req.user!.companyId);
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Channel reconciliation completed",
+        data: result,
+      });
+    }
+  );
+
   // ===== Webhook verification =====
   static verifyWebhook = asyncHandler(
     async (req: Request, res: Response) => {

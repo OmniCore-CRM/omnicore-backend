@@ -141,6 +141,35 @@ enum WebhookProvider {
   EMAIL
 }
 
+enum ChannelRetryState {
+  PENDING
+  RETRY_SCHEDULED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  EXHAUSTED
+}
+
+enum ChannelDlqReason {
+  RETRY_EXHAUSTED
+  DELIVERY_UNMATCHED
+  INVALID_LIFECYCLE_TRANSITION
+  PROVIDER_PROCESSING_FAILURE
+}
+
+enum ChannelDlqState {
+  OPEN
+  REPROCESSING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReconciliationRunStatus {
+  STARTED
+  COMPLETED
+  FAILED
+}
+
 enum ProviderAccountStatus {
   ACTIVE
   DISABLED
@@ -215,6 +244,9 @@ model Company {
   emailAccounts           EmailAccount[]
   whatsAppAccounts        WhatsAppAccount[]
   webhookReplayLedger     WebhookReplayLedger[]
+  messageRetryStates      MessageRetryState[]
+  channelDeadLetterItems  ChannelDeadLetterItem[]
+  reconciliationRuns      ReconciliationRun[]
   authSessions            AuthSession[]
   userInviteTokens        UserInviteToken[]
   notifications           Notification[]
@@ -440,11 +472,110 @@ model Message {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   attachments Attachment[]
+  retryState  MessageRetryState?
+  dlqItems    ChannelDeadLetterItem[]
 
   @@index([companyId])
   @@index([conversationId])
   @@index([companyId, provider, externalMessageId])
   @@index([companyId, conversationId, createdAt, id])
+}
+
+model MessageRetryState {
+  id String @id @default(cuid())
+
+  messageId String @unique
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  provider ConversationChannel
+  state    ChannelRetryState @default(PENDING)
+
+  attemptCount Int @default(0)
+  maxAttempts  Int @default(5)
+
+  nextAttemptAt DateTime?
+  lastAttemptAt DateTime?
+  lastFailureAt DateTime?
+
+  lastFailureCode   String?
+  lastFailureReason String?
+  lastHttpStatus    Int?
+
+  lockedAt   DateTime?
+  lockToken  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, provider, state, nextAttemptAt])
+  @@index([state, nextAttemptAt])
+}
+
+model ChannelDeadLetterItem {
+  id String @id @default(cuid())
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  provider ConversationChannel
+  reason   ChannelDlqReason
+  state    ChannelDlqState @default(OPEN)
+
+  sourceEventType String
+  payload         Json
+
+  messageId String?
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  externalMessageId String?
+  providerAccountId String?
+
+  failureCode   String?
+  failureReason String
+  failureMeta   Json?
+
+  firstFailedAt DateTime @default(now())
+  lastFailedAt  DateTime @default(now())
+
+  retryCount    Int @default(0)
+  nextRetryAt   DateTime?
+  processedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([provider, reason, state, nextRetryAt])
+  @@index([companyId, state, nextRetryAt])
+  @@index([externalMessageId])
+}
+
+model ReconciliationRun {
+  id String @id @default(cuid())
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  runType String
+  status  ReconciliationRunStatus
+
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  scannedCount   Int @default(0)
+  updatedCount   Int @default(0)
+  createdDlqCount Int @default(0)
+
+  errorMessage String?
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([runType, status, startedAt])
+  @@index([companyId, startedAt])
 }
 
 model WidgetInstallation {

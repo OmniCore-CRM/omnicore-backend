@@ -1,4 +1,5 @@
 import {
+  ChannelDlqReason,
   ConversationChannel,
   EmailAccountStatus,
   EmailProvider,
@@ -23,6 +24,7 @@ import { mapMessage } from "@/modules/messages/message.mapper.js";
 import { getIO } from "@/socket/socket.server.js";
 import { mapEmailAccount, mapEmailAccounts } from "./email.mapper.js";
 import { WebhookReplayService } from "@/modules/channels/webhook-replay.service.js";
+import { ChannelReliabilityService } from "@/modules/channels/channel-reliability.service.js";
 import type {
   CreateEmailAccountInput,
   UpdateEmailAccountInput,
@@ -412,6 +414,18 @@ export class EmailService {
           ? { customer: null, conversation: null, message: duplicate }
           : null;
       }
+
+      await ChannelReliabilityService.moveToDlq({
+        companyId: account.companyId,
+        provider: ConversationChannel.EMAIL,
+        reason: ChannelDlqReason.PROVIDER_PROCESSING_FAILURE,
+        sourceEventType: "EMAIL_WEBHOOK_INGESTION",
+        payload: ChannelReliabilityService.toJsonValue(payload),
+        externalMessageId: email.externalMessageId,
+        failureCode: "EMAIL_WEBHOOK_PROCESSING_FAILED",
+        failureReason: error instanceof Error ? error.message : "email_webhook_processing_failed",
+      });
+
       throw error;
     });
     if (!result) return null;
@@ -452,7 +466,17 @@ export class EmailService {
     subject?: string | null;
     content: string;
   }) {
-    const fail = async (message: string, code: string): Promise<never> => {
+    await ChannelReliabilityService.ensureRetryState({
+      companyId: input.companyId,
+      messageId: input.messageId,
+      provider: ConversationChannel.EMAIL,
+    });
+
+    const fail = async (
+      message: string,
+      code: string,
+      details?: Record<string, unknown>
+    ): Promise<never> => {
       const failed = await prisma.message.update({
         where: { id: input.messageId },
         data: { status: MessageStatus.FAILED, provider: ConversationChannel.EMAIL },
@@ -460,7 +484,10 @@ export class EmailService {
       emitMessageStatus(failed);
       throw new AppError(message, HTTP_STATUS.BAD_GATEWAY, {
         code,
-        details: { provider: "EMAIL" },
+        details: {
+          provider: "EMAIL",
+          ...details,
+        },
       });
     };
     const account = await prisma.emailAccount.findFirst({
@@ -470,7 +497,10 @@ export class EmailService {
     if (!account || !env.RESEND_API_KEY || !input.customerEmail) {
       return fail(
         "Email message failed. The email channel or recipient is not configured.",
-        "EMAIL_PROVIDER_NOT_CONFIGURED"
+        "EMAIL_PROVIDER_NOT_CONFIGURED",
+        {
+          reason: "provider_not_configured",
+        }
       );
     }
 
@@ -502,7 +532,11 @@ export class EmailService {
         }));
         return fail(
           "Email message failed. Check the recipient and email channel configuration.",
-          "EMAIL_SEND_FAILED"
+          "EMAIL_SEND_FAILED",
+          {
+            reason: "provider_rejected",
+            providerStatus: response.status,
+          }
         );
       }
 
@@ -544,7 +578,10 @@ export class EmailService {
       }));
       return fail(
         "Email message failed because the email provider is unavailable.",
-        "EMAIL_PROVIDER_UNAVAILABLE"
+        "EMAIL_PROVIDER_UNAVAILABLE",
+        {
+          reason: "provider_unavailable",
+        }
       );
     }
   }

@@ -83,8 +83,12 @@ const recordReplayRejectedAudit = async (input: {
   reason?: string | null;
   payloadFingerprint: string;
 }) => {
+  if (!input.companyId) {
+    return;
+  }
+
   await AuditLogService.record({
-    companyId: input.companyId ?? "system",
+    companyId: input.companyId,
     action: `${input.provider}_REPLAY_REJECTED`,
     entityType: "WEBHOOK_EVENT",
     entityId: input.providerEventId ?? input.payloadFingerprint,

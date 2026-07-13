@@ -144,11 +144,16 @@ export class MessageService {
       (conversation.channel === "WHATSAPP" ||
         conversation.channel === "EMAIL")
     ) {
-      const providerMessage = await ChannelService.sendOutboundMessage({
+      const providerMessage = await ChannelService.retryOutboundMessage({
+        companyId,
         messageId: message.id,
-        conversationId: conversation.id,
-        content: data.content,
+        force: true,
       });
+
+      if (!providerMessage) {
+        const fallback = await prisma.message.findUnique({ where: { id: message.id } });
+        return mapMessage(fallback ?? message);
+      }
 
       return mapMessage(providerMessage);
     }
