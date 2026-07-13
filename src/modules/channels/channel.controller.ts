@@ -12,6 +12,7 @@ import { WebhookProvider } from "@prisma/client";
 import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js";
 import { ChannelReconciliationService } from "./channel-reconciliation.service.js";
 import type { ChannelDeliveryEvent } from "./channel.types.js";
+import { ChannelObservabilityService } from "./channel-observability.service.js";
 
 type RawBodyRequest = Request & {
   rawBody?: Buffer;
@@ -77,6 +78,19 @@ const webhookSecurityContext = (req: RawBodyRequest) => {
 };
 
 export class ChannelController {
+  static operationsOverview = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Channel operations overview retrieved successfully",
+        data: await ChannelObservabilityService.operationsOverview(
+          req.user!.companyId
+        ),
+      });
+    }
+  );
+
   static reconcileReliability = asyncHandler(
     async (req: AuthenticatedRequest, res: Response) => {
       const result = await ChannelReconciliationService.runCompany(req.user!.companyId);
@@ -117,11 +131,23 @@ export class ChannelController {
   static receiveWebhook = asyncHandler(
     
     async (req: RawBodyRequest, res: Response) => {
+      const startedAt = Date.now();
       const security = webhookSecurityContext(req);
 
       try {
         verifyMetaSignature(req);
       } catch (error) {
+        ChannelObservabilityService.record({
+          metric: "webhook.signature_failed",
+          provider: "WHATSAPP",
+          requestId: security.requestId,
+          providerEventId: null,
+          companyId: null,
+          eventType: "WHATSAPP_WEBHOOK",
+          outcome: "rejected",
+          latencyMs: Date.now() - startedAt,
+          safeErrorCode: error instanceof AppError ? error.code ?? "INVALID_SIGNATURE" : "INVALID_SIGNATURE",
+        });
         await WebhookReplayService.recordSecurityEvent({
           provider: WebhookProvider.WHATSAPP,
           eventType: "SECURITY_SIGNATURE_FAILED",
@@ -172,6 +198,17 @@ export class ChannelController {
       }
 
       if (changeEnvelope.length === 0) {
+        ChannelObservabilityService.record({
+          metric: "webhook.rejected",
+          provider: "WHATSAPP",
+          requestId: security.requestId,
+          providerEventId: null,
+          companyId: null,
+          eventType: "WHATSAPP_WEBHOOK",
+          outcome: "rejected",
+          latencyMs: Date.now() - startedAt,
+          safeErrorCode: "UNSUPPORTED_PAYLOAD_SHAPE",
+        });
         await WebhookReplayService.recordSecurityEvent({
           provider: WebhookProvider.WHATSAPP,
           eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
@@ -299,6 +336,18 @@ export class ChannelController {
       // Process delivery events
       // Create conversations/messages
       // Emit realtime events
+
+      ChannelObservabilityService.record({
+        metric: "webhook.accepted",
+        provider: "WHATSAPP",
+        requestId: security.requestId,
+        providerEventId:
+          statusEvents[0]?.externalMessageId ?? messageEvents[0]?.externalMessageId ?? null,
+        companyId: null,
+        eventType: "WHATSAPP_WEBHOOK",
+        outcome: "accepted",
+        latencyMs: Date.now() - startedAt,
+      });
 
       return sendResponse({
         res,

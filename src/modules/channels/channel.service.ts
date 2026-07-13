@@ -21,6 +21,7 @@ import { EmailService } from "@/modules/email/email.service.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { WebhookReplayService } from "./webhook-replay.service.js";
 import { ChannelReliabilityService } from "./channel-reliability.service.js";
+import { ChannelObservabilityService } from "./channel-observability.service.js";
 
 const WHATSAPP_SEND_FAILED_MESSAGE =
   "WhatsApp message failed. The recipient may be invalid, not allowed for this test number, or outside the messaging window.";
@@ -416,6 +417,17 @@ export class ChannelService {
 
     // Message may not exist yet
     if (!message) {
+      ChannelObservabilityService.record({
+        metric: "lifecycle.unmatched_status_events",
+        provider: "WHATSAPP",
+        companyId,
+        requestId: context?.requestId,
+        providerEventId: payload.externalMessageId,
+        eventType: "WHATSAPP_DELIVERY_EVENT",
+        outcome: "rejected",
+        safeErrorCode: "DELIVERY_UNMATCHED",
+      });
+
       await ChannelReliabilityService.moveToDlq({
         companyId,
         provider: ConversationChannel.WHATSAPP,
@@ -451,6 +463,17 @@ export class ChannelService {
       messageStatusRank[payload.status] <
       messageStatusRank[message.status]
     ) {
+      ChannelObservabilityService.record({
+        metric: "lifecycle.invalid_transitions",
+        provider: "WHATSAPP",
+        companyId,
+        requestId: context?.requestId,
+        providerEventId: payload.externalMessageId,
+        eventType: "WHATSAPP_DELIVERY_EVENT",
+        outcome: "rejected",
+        safeErrorCode: "INVALID_LIFECYCLE_TRANSITION",
+      });
+
       await ChannelReliabilityService.moveToDlq({
         companyId,
         provider: ConversationChannel.WHATSAPP,
@@ -500,6 +523,15 @@ export class ChannelService {
     });
 
     emitMessageStatusUpdated(updatedMessage);
+    ChannelObservabilityService.record({
+      metric: "lifecycle.status_updates",
+      provider: "WHATSAPP",
+      companyId,
+      requestId: context?.requestId,
+      providerEventId: payload.externalMessageId,
+      eventType: "WHATSAPP_DELIVERY_EVENT",
+      outcome: "success",
+    });
   }
 
   // ===== Send outbound provider message =====
@@ -679,6 +711,16 @@ export class ChannelService {
 
       emitMessageStatusUpdated(failedMessage);
 
+      ChannelObservabilityService.record({
+        metric: "messaging.send_failed",
+        provider: "WHATSAPP",
+        companyId,
+        providerEventId: null,
+        eventType: "WHATSAPP_SEND",
+        outcome: "failure",
+        safeErrorCode: "WHATSAPP_PROVIDER_NOT_CONFIGURED",
+      });
+
       throw new AppError(
         "WhatsApp provider is not configured",
         HTTP_STATUS.BAD_GATEWAY,
@@ -764,6 +806,18 @@ export class ChannelService {
           },
         });
 
+        ChannelObservabilityService.record({
+          metric: "messaging.send_failed",
+          provider: "WHATSAPP",
+          companyId,
+          providerEventId: null,
+          eventType: "WHATSAPP_SEND",
+          outcome: "failure",
+          safeErrorCode: failure.reason === "PROVIDER_UNAVAILABLE"
+            ? "WHATSAPP_PROVIDER_UNAVAILABLE"
+            : "WHATSAPP_PROVIDER_REJECTED",
+        });
+
         throw new AppError(
           WHATSAPP_SEND_FAILED_MESSAGE,
           HTTP_STATUS.BAD_GATEWAY,
@@ -801,6 +855,15 @@ export class ChannelService {
 
     // Emit realtime inbox update
     emitMessageStatusUpdated(message);
+
+    ChannelObservabilityService.record({
+      metric: "messaging.send_success",
+      provider: "WHATSAPP",
+      companyId,
+      providerEventId: externalMessageId,
+      eventType: "WHATSAPP_SEND",
+      outcome: "success",
+    });
 
     return message;
   }

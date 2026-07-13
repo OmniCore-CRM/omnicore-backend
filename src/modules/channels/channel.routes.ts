@@ -35,4 +35,11 @@ router.post(
   ChannelController.reconcileReliability
 );
 
+router.get(
+  "/operations/overview",
+  protect,
+  authorize(...RBAC.admin),
+  ChannelController.operationsOverview
+);
+
 export default router;

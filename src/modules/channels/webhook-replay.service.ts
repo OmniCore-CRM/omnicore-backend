@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { ChannelObservabilityService } from "./channel-observability.service.js";
 
 type ReplayClaimInput = {
   provider: WebhookProvider;
@@ -184,6 +185,17 @@ export class WebhookReplayService {
           requestId,
           reason: input.reason,
           payloadFingerprint,
+        });
+
+        ChannelObservabilityService.record({
+          metric: "webhook.replay_rejected",
+          provider: input.provider,
+          companyId,
+          requestId,
+          providerEventId,
+          eventType: input.eventType,
+          outcome: "rejected",
+          safeErrorCode: "REPLAY_DETECTED",
         });
 
         return {

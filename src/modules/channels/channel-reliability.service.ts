@@ -12,6 +12,7 @@ import { AppError } from "@/core/errors/app-error.js";
 import { mapMessage } from "@/modules/messages/message.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { getIO } from "@/socket/socket.server.js";
+import { ChannelObservabilityService } from "./channel-observability.service.js";
 
 type RetryProvider = "WHATSAPP" | "EMAIL";
 
@@ -348,6 +349,16 @@ export class ChannelReliabilityService {
         },
       });
 
+      ChannelObservabilityService.record({
+        metric: "messaging.retry_scheduled",
+        provider: providerPrefix(input.provider),
+        companyId: input.companyId,
+        providerEventId: null,
+        eventType: input.sourceEventType,
+        outcome: "scheduled",
+        safeErrorCode: input.classification.code,
+      });
+
       return;
     }
 
@@ -381,6 +392,16 @@ export class ChannelReliabilityService {
         failureReason: input.classification.reason,
         sourceEventType: input.sourceEventType,
       },
+    });
+
+    ChannelObservabilityService.record({
+      metric: "messaging.retry_exhausted",
+      provider: providerPrefix(input.provider),
+      companyId: input.companyId,
+      providerEventId: null,
+      eventType: input.sourceEventType,
+      outcome: "failure",
+      safeErrorCode: input.classification.code,
     });
 
     await this.moveToDlq({
@@ -479,6 +500,16 @@ export class ChannelReliabilityService {
           failureReason: input.failureReason,
           externalMessageId: input.externalMessageId,
         },
+      });
+
+      ChannelObservabilityService.record({
+        metric: "messaging.dlq_created",
+        provider: providerPrefix(input.provider),
+        companyId: input.companyId,
+        providerEventId: input.externalMessageId ?? null,
+        eventType: input.sourceEventType,
+        outcome: "failure",
+        safeErrorCode: input.failureCode ?? null,
       });
     }
   }

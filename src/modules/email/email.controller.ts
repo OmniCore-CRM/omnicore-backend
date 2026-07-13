@@ -7,6 +7,7 @@ import { EmailService } from "./email.service.js";
 import { WebhookReplayService } from "@/modules/channels/webhook-replay.service.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { WebhookProvider } from "@prisma/client";
+import { ChannelObservabilityService } from "@/modules/channels/channel-observability.service.js";
 
 const getUserContext = (req: AuthenticatedRequest) => ({
   userId: req.user!.userId,
@@ -61,6 +62,7 @@ export class EmailController {
 
   static receiveWebhook = asyncHandler(
     async (req: AuthenticatedRequest, res: Response) => {
+      const startedAt = Date.now();
       const rawBody = (req as AuthenticatedRequest & { rawBody?: Buffer }).rawBody;
       const rawPayload = rawBody?.toString("utf8") ?? JSON.stringify(req.body);
       const payloadFingerprint = WebhookReplayService.payloadFingerprint(rawPayload);
@@ -79,6 +81,17 @@ export class EmailController {
           rawBody,
         });
       } catch (error) {
+        ChannelObservabilityService.record({
+          metric: "webhook.signature_failed",
+          provider: "EMAIL",
+          requestId,
+          providerEventId: null,
+          companyId: null,
+          eventType: "EMAIL_WEBHOOK",
+          outcome: "rejected",
+          latencyMs: Date.now() - startedAt,
+          safeErrorCode: error instanceof AppError ? error.code ?? "INVALID_SIGNATURE" : "INVALID_SIGNATURE",
+        });
         await WebhookReplayService.recordSecurityEvent({
           provider: WebhookProvider.EMAIL,
           eventType: "SECURITY_SIGNATURE_FAILED",
@@ -93,6 +106,17 @@ export class EmailController {
       }
 
       if (!req.body || typeof req.body !== "object") {
+        ChannelObservabilityService.record({
+          metric: "webhook.rejected",
+          provider: "EMAIL",
+          requestId,
+          providerEventId: null,
+          companyId: null,
+          eventType: "EMAIL_WEBHOOK",
+          outcome: "rejected",
+          latencyMs: Date.now() - startedAt,
+          safeErrorCode: "UNSUPPORTED_PAYLOAD_SHAPE",
+        });
         await WebhookReplayService.recordSecurityEvent({
           provider: WebhookProvider.EMAIL,
           eventType: "SECURITY_TRUST_BOUNDARY_VIOLATION",
@@ -104,11 +128,24 @@ export class EmailController {
         });
       }
 
+      const data = await EmailService.processWebhook(req.body);
+
+      ChannelObservabilityService.record({
+        metric: "webhook.accepted",
+        provider: "EMAIL",
+        requestId,
+        providerEventId: null,
+        companyId: null,
+        eventType: "EMAIL_WEBHOOK",
+        outcome: "accepted",
+        latencyMs: Date.now() - startedAt,
+      });
+
       return sendResponse({
         res,
         statusCode: HTTP_STATUS.CREATED,
         message: "Email webhook processed successfully",
-        data: await EmailService.processWebhook(req.body),
+        data,
       });
     }
   );

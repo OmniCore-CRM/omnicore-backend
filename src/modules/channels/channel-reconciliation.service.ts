@@ -10,6 +10,7 @@ import { prisma } from "@/config/db.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { ChannelReliabilityService } from "./channel-reliability.service.js";
 import { ChannelService } from "./channel.service.js";
+import { ChannelObservabilityService } from "./channel-observability.service.js";
 
 type ReconciliationSummary = {
   runId: string;
@@ -39,6 +40,14 @@ export class ChannelReconciliationService {
       metadata: {
         runType: "CHANNEL_RELIABILITY",
       },
+    });
+
+    ChannelObservabilityService.record({
+      metric: "operations.reconciliation_started",
+      provider: "EMAIL",
+      companyId,
+      eventType: "CHANNEL_RELIABILITY",
+      outcome: "scheduled",
     });
 
     let scannedCount = 0;
@@ -227,6 +236,14 @@ export class ChannelReconciliationService {
         },
       });
 
+      ChannelObservabilityService.record({
+        metric: "operations.reconciliation_completed",
+        provider: "EMAIL",
+        companyId,
+        eventType: "CHANNEL_RELIABILITY",
+        outcome: "completed",
+      });
+
       return {
         runId: run.id,
         status: ReconciliationRunStatus.COMPLETED,
@@ -250,6 +267,15 @@ export class ChannelReconciliationService {
             errors,
           },
         },
+      });
+
+      ChannelObservabilityService.record({
+        metric: "operations.reconciliation_failed",
+        provider: "EMAIL",
+        companyId,
+        eventType: "CHANNEL_RELIABILITY",
+        outcome: "failure",
+        safeErrorCode: "RECONCILIATION_FAILED",
       });
 
       throw error;

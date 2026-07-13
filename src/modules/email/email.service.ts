@@ -25,6 +25,7 @@ import { getIO } from "@/socket/socket.server.js";
 import { mapEmailAccount, mapEmailAccounts } from "./email.mapper.js";
 import { WebhookReplayService } from "@/modules/channels/webhook-replay.service.js";
 import { ChannelReliabilityService } from "@/modules/channels/channel-reliability.service.js";
+import { ChannelObservabilityService } from "@/modules/channels/channel-observability.service.js";
 import type {
   CreateEmailAccountInput,
   UpdateEmailAccountInput,
@@ -538,6 +539,16 @@ export class EmailService {
     });
 
     if (!account) {
+      ChannelObservabilityService.record({
+        metric: "webhook.rejected",
+        provider: "EMAIL",
+        companyId: null,
+        providerEventId: email.providerEventId ?? email.externalMessageId,
+        eventType: "EMAIL_WEBHOOK",
+        outcome: "rejected",
+        safeErrorCode: "INVALID_TENANT_RESOLUTION",
+      });
+
       await WebhookReplayService.recordSecurityEvent({
         provider: WebhookProvider.EMAIL,
         eventType: "SECURITY_INVALID_TENANT_RESOLUTION",
@@ -738,6 +749,15 @@ export class EmailService {
         subject: email.subject,
       },
     });
+
+    ChannelObservabilityService.record({
+      metric: "webhook.accepted",
+      provider: "EMAIL",
+      companyId: account.companyId,
+      providerEventId: email.providerEventId ?? email.externalMessageId,
+      eventType: "EMAIL_INBOUND_MESSAGE",
+      outcome: "accepted",
+    });
     return mapMessage(result.message);
   }
 
@@ -760,6 +780,16 @@ export class EmailService {
     });
 
     if (!message) {
+      ChannelObservabilityService.record({
+        metric: "lifecycle.unmatched_status_events",
+        provider: "EMAIL",
+        companyId: null,
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        eventType: "EMAIL_STATUS_EVENT",
+        outcome: "rejected",
+        safeErrorCode: "EMAIL_STATUS_UNMATCHED",
+      });
+
       await ChannelReliabilityService.moveToDlq({
         provider: ConversationChannel.EMAIL,
         reason: ChannelDlqReason.DELIVERY_UNMATCHED,
@@ -814,6 +844,16 @@ export class EmailService {
     const nextStatus = mapLifecycleToMessageStatus(event.status);
 
     if (emailMessageStatusRank[nextStatus] < emailMessageStatusRank[message.status]) {
+      ChannelObservabilityService.record({
+        metric: "lifecycle.invalid_transitions",
+        provider: "EMAIL",
+        companyId: message.companyId,
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        eventType: "EMAIL_STATUS_EVENT",
+        outcome: "rejected",
+        safeErrorCode: "EMAIL_STATUS_REGRESSION",
+      });
+
       await ChannelReliabilityService.moveToDlq({
         companyId: message.companyId,
         provider: ConversationChannel.EMAIL,
@@ -873,6 +913,59 @@ export class EmailService {
       },
     });
 
+    ChannelObservabilityService.record({
+      metric: "lifecycle.status_updates",
+      provider: "EMAIL",
+      companyId: message.companyId,
+      providerEventId: event.providerEventId ?? event.externalMessageId,
+      eventType: "EMAIL_STATUS_EVENT",
+      outcome: "success",
+    });
+
+    if (event.status === "DELIVERED") {
+      ChannelObservabilityService.record({
+        metric: "deliverability.delivered",
+        provider: "EMAIL",
+        companyId: message.companyId,
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        eventType: "EMAIL_STATUS_EVENT",
+        outcome: "success",
+      });
+    }
+
+    if (event.status === "BOUNCED") {
+      ChannelObservabilityService.record({
+        metric: "deliverability.bounced",
+        provider: "EMAIL",
+        companyId: message.companyId,
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        eventType: "EMAIL_STATUS_EVENT",
+        outcome: "success",
+      });
+    }
+
+    if (event.status === "COMPLAINED") {
+      ChannelObservabilityService.record({
+        metric: "deliverability.complained",
+        provider: "EMAIL",
+        companyId: message.companyId,
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        eventType: "EMAIL_STATUS_EVENT",
+        outcome: "success",
+      });
+    }
+
+    if (event.status === "DEFERRED") {
+      ChannelObservabilityService.record({
+        metric: "deliverability.deferred",
+        provider: "EMAIL",
+        companyId: message.companyId,
+        providerEventId: event.providerEventId ?? event.externalMessageId,
+        eventType: "EMAIL_STATUS_EVENT",
+        outcome: "success",
+      });
+    }
+
     emitMessageStatus(updated);
     return mapMessage(updated);
   }
@@ -914,6 +1007,16 @@ export class EmailService {
       orderBy: { createdAt: "asc" },
     });
     if (!account || !env.RESEND_API_KEY || !input.customerEmail) {
+      ChannelObservabilityService.record({
+        metric: "messaging.send_failed",
+        provider: "EMAIL",
+        companyId: input.companyId,
+        providerEventId: null,
+        eventType: "EMAIL_SEND",
+        outcome: "failure",
+        safeErrorCode: "EMAIL_PROVIDER_NOT_CONFIGURED",
+      });
+
       return fail(
         "Email message failed. The email channel or recipient is not configured.",
         "EMAIL_PROVIDER_NOT_CONFIGURED",
@@ -985,6 +1088,14 @@ export class EmailService {
           subject: input.subject || "Re: Support request",
         },
       });
+      ChannelObservabilityService.record({
+        metric: "messaging.send_success",
+        provider: "EMAIL",
+        companyId: input.companyId,
+        providerEventId: body.id,
+        eventType: "EMAIL_SEND",
+        outcome: "success",
+      });
       return sent;
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -995,6 +1106,15 @@ export class EmailService {
         conversationId: input.conversationId,
         messageId: input.messageId,
       }));
+      ChannelObservabilityService.record({
+        metric: "messaging.send_failed",
+        provider: "EMAIL",
+        companyId: input.companyId,
+        providerEventId: null,
+        eventType: "EMAIL_SEND",
+        outcome: "failure",
+        safeErrorCode: "EMAIL_PROVIDER_UNAVAILABLE",
+      });
       return fail(
         "Email message failed because the email provider is unavailable.",
         "EMAIL_PROVIDER_UNAVAILABLE",
