@@ -23,6 +23,7 @@ import { mapAuthResponse } from "./auth.mapper.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { NotificationService } from "@/modules/notifications/notification.service.js";
 import { NotificationType } from "@prisma/client";
+import { disconnectSessionSockets, disconnectUserSockets } from "@/socket/socket.server.js";
 
 type UserWithCompany = User & { company: Company };
 type IssuedAuth = {
@@ -446,6 +447,8 @@ export class AuthService {
       });
     });
 
+    disconnectUserSockets(reset.userId);
+
     await AuditLogService.record({
       companyId: reset.user.companyId,
       actorId: reset.user.id,
@@ -715,6 +718,8 @@ export class AuthService {
         data: { revokedAt: now },
       });
 
+      disconnectSessionSockets(session.id);
+
       await AuditLogService.record({
         companyId: session.companyId,
         actorId: session.userId,
@@ -747,6 +752,8 @@ export class AuthService {
         where: { id: session.id },
         data: { revokedAt: now },
       });
+
+      disconnectSessionSockets(session.id);
 
       await AuditLogService.record({
         companyId: session.companyId,

@@ -178,6 +178,7 @@ export const initializeSocketServer = (httpServer: HTTPServer) => {
       // Agent sockets receive tenant-scoped broadcasts through their company room.
       void socket.join(`company:${companyId}`);
       void socket.join(`user:${socketData.userId}`);
+      void socket.join(`session:${socketData.sessionId}`);
     }
 
     const socketEventBuckets = new Map<
@@ -310,4 +311,14 @@ export const getIO = () => {
   }
 
   return io;
+};
+
+export const disconnectSessionSockets = (sessionId: string) => {
+  if (!io) return;
+  io.in(`session:${sessionId}`).disconnectSockets(true);
+};
+
+export const disconnectUserSockets = (userId: string) => {
+  if (!io) return;
+  io.in(`user:${userId}`).disconnectSockets(true);
 };

@@ -16,6 +16,7 @@ import { AuthService } from "@/modules/auth/auth.service.js";
 import { NotificationService } from "@/modules/notifications/notification.service.js";
 import { mapUsers } from "./user.mapper.js";
 import { NotificationType } from "@prisma/client";
+import { disconnectUserSockets } from "@/socket/socket.server.js";
 import type {
   CreateUserInput,
   UpdateUserInput,
@@ -521,6 +522,10 @@ export class UserService {
     this.clearListCache(input.companyId);
 
     if (existing.status !== updated.status) {
+      if (updated.status !== UserLifecycleStatus.ACTIVE) {
+        disconnectUserSockets(updated.id);
+      }
+
       const actionByStatus: Record<UserLifecycleStatus, string> = {
         INVITED: "USER_UPDATED",
         ACTIVE: "USER_ACTIVATED",
