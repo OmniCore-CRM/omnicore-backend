@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ConversationChannel, SlaStatus } from "@prisma/client";
 
 export const analyticsRangeSchema = z.enum(["7d", "30d", "90d", "all"]);
 
@@ -13,11 +14,31 @@ const isValidDate = (value: Date) => Number.isFinite(value.getTime());
 
 const MAX_CUSTOM_RANGE_DAYS = 365;
 
+const optionalIdSchema = z.string().trim().min(1).max(128).optional();
+
+const optionalBooleanSchema = z
+  .union([z.boolean(), z.string()])
+  .optional()
+  .transform((value) => {
+    if (value === undefined) return true;
+    if (typeof value === "boolean") return value;
+
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+
+    return true;
+  });
+
 export const analyticsOverviewQuerySchema = z
   .object({
     range: analyticsRangeSchema.default("30d"),
     startDate: isoDateSchema.optional(),
     endDate: isoDateSchema.optional(),
+    teamId: optionalIdSchema,
+    channel: z.nativeEnum(ConversationChannel).optional(),
+    slaStatus: z.nativeEnum(SlaStatus).optional(),
+    comparePrevious: optionalBooleanSchema,
   })
   .superRefine((value, ctx) => {
     const hasStart = Boolean(value.startDate);
