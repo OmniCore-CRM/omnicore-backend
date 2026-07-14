@@ -2,6 +2,7 @@ import {
   ConversationActivityAction,
   ConversationChannel,
   ConversationStatus,
+  FeedbackTriggerSource,
   Prisma,
   UserLifecycleStatus,
   UserRole,
@@ -29,6 +30,7 @@ import { getIO } from "@/socket/socket.server.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { NotificationService } from "@/modules/notifications/notification.service.js";
+import { FeedbackService } from "@/modules/feedback/feedback.service.js";
 
 type UserContext = {
   userId: string;
@@ -843,6 +845,23 @@ export class ConversationService {
           from: existing.assigneeId,
           to: assigneeId,
         },
+      });
+    }
+
+    if (
+      statusChanged &&
+      data.status === ConversationStatus.RESOLVED &&
+      conversation.customerId
+    ) {
+      await FeedbackService.createSurveysFromEvent({
+        companyId: user.companyId,
+        actorId: user.userId,
+        triggerSource: FeedbackTriggerSource.CONVERSATION_RESOLVED,
+        triggerEventKey: `conversation:${conversation.id}:resolved`,
+        customerId: conversation.customerId,
+        conversationId: conversation.id,
+        channel: conversation.channel,
+        assigneeId: conversation.assigneeId ?? undefined,
       });
     }
 

@@ -1,4 +1,5 @@
 import {
+  FeedbackTriggerSource,
   TicketActivityAction,
   TicketPriority,
   TicketStatus,
@@ -26,6 +27,7 @@ import { TicketSlaService } from "@/modules/sla-policies/ticket-sla.service.js";
 import { AssignmentRuleService } from "@/modules/assignment-rules/assignment-rule.service.js";
 import { NotificationService } from "@/modules/notifications/notification.service.js";
 import { NotificationType } from "@prisma/client";
+import { FeedbackService } from "@/modules/feedback/feedback.service.js";
 import type {
   CreateConversationTicketInput,
   CreateTicketNoteInput,
@@ -742,6 +744,11 @@ export class TicketService {
     const dto = mapTicket(ticket);
     getIO().to(`company:${user.companyId}`).emit("ticket_updated", dto);
 
+    const transitionedToResolved =
+      data.status !== undefined &&
+      data.status !== existing.status &&
+      (data.status === TicketStatus.RESOLVED || data.status === TicketStatus.CLOSED);
+
     if (
       data.assigneeId !== undefined &&
       links.assigneeId &&
@@ -837,6 +844,21 @@ export class TicketService {
             : {}),
           ...(resolvedAt ? { resolvedAt: resolvedAt.toISOString() } : {}),
         },
+      });
+    }
+
+    if (transitionedToResolved && dto.customerId) {
+      const eventResolvedAt = resolvedAt ?? new Date();
+      await FeedbackService.createSurveysFromEvent({
+        companyId: user.companyId,
+        actorId: user.userId,
+        triggerSource: FeedbackTriggerSource.TICKET_RESOLVED,
+        triggerEventKey: `ticket:${dto.id}:${eventResolvedAt.toISOString()}`,
+        customerId: dto.customerId,
+        ticketId: dto.id,
+        conversationId: dto.conversationId ?? undefined,
+        channel: dto.conversation?.channel,
+        assigneeId: dto.assigneeId ?? undefined,
       });
     }
 

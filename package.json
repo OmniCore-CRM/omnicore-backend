@@ -9,7 +9,14 @@
     "start:staging": "tsx src/server.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "seed:staging": "tsx prisma/seed.ts"
+    "prisma:guard-shadow": "tsx scripts/ensure-prisma-shadow-safety.ts",
+    "prisma:generate": "npm run prisma:guard-shadow && prisma generate",
+    "prisma:migrate:status": "npm run prisma:guard-shadow && prisma migrate status",
+    "prisma:seed": "npm run prisma:guard-shadow && prisma db seed",
+    "seed:staging": "npm run prisma:guard-shadow && tsx prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed-with-guard.ts"
   },
   "keywords": [],
   "author": "",

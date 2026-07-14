@@ -125,6 +125,46 @@ enum NotificationType {
   USER_ACTIVATED
   TEAM_MEMBER_ADDED
   ROLE_CHANGED
+  FEEDBACK_DETRACTOR_ESCALATION
+}
+
+enum FeedbackSurveyType {
+  CSAT
+  NPS
+}
+
+enum FeedbackSurveyStatus {
+  PENDING
+  SENT
+  COMPLETED
+  EXPIRED
+}
+
+enum FeedbackTriggerSource {
+  TICKET_RESOLVED
+  CONVERSATION_RESOLVED
+}
+
+enum FeedbackTriggerMode {
+  DISABLED
+  CSAT
+  NPS
+  BOTH
+}
+
+enum FeedbackSentiment {
+  DETRACTOR
+  NEUTRAL
+  SATISFIED
+  PASSIVE
+  PROMOTER
+}
+
+enum FeedbackEscalationStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  DISMISSED
 }
 
 enum EmailProvider {
@@ -250,6 +290,10 @@ model Company {
   authSessions            AuthSession[]
   userInviteTokens        UserInviteToken[]
   notifications           Notification[]
+  feedbackTriggerConfigs  FeedbackTriggerConfig[]
+  feedbackSurveys         FeedbackSurvey[]
+  feedbackResponses       FeedbackResponse[]
+  feedbackEscalations     FeedbackEscalation[]
 }
 
 model User {
@@ -286,6 +330,8 @@ model User {
   sentInviteTokens       UserInviteToken[]      @relation("UserInviteActor")
   receivedInviteTokens   UserInviteToken[]      @relation("UserInviteTarget")
   notifications          Notification[]
+  assignedFeedbackSurveys     FeedbackSurvey[]     @relation("FeedbackSurveyAssignee")
+  assignedFeedbackEscalations FeedbackEscalation[] @relation("FeedbackEscalationAssignee")
 
   @@index([companyId, firstName, lastName])
   @@index([companyId, status, firstName, lastName])
@@ -379,6 +425,8 @@ model Customer {
   tickets       Ticket[]
   tags          CustomerTag[]
   attachments   Attachment[]
+  feedbackSurveys   FeedbackSurvey[]
+  feedbackResponses FeedbackResponse[]
 }
 
 model Conversation {
@@ -411,6 +459,8 @@ model Conversation {
   tags        ConversationTag[]
   activities  ConversationActivity[]
   attachments Attachment[]
+  feedbackSurveys   FeedbackSurvey[]
+  feedbackResponses FeedbackResponse[]
 
   @@index([companyId])
   @@index([customerId])
@@ -790,6 +840,8 @@ model Ticket {
   activities  TicketActivity[]
   tags        TicketTag[]
   attachments Attachment[]
+  feedbackSurveys   FeedbackSurvey[]
+  feedbackResponses FeedbackResponse[]
 
   @@index([companyId])
   @@index([conversationId])
@@ -1106,4 +1158,136 @@ model Notification {
   @@index([companyId, userId, createdAt, id])
   @@index([companyId, userId, isRead, createdAt, id])
   @@index([companyId, userId, type, entityType, entityId])
+}
+
+model FeedbackTriggerConfig {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  source FeedbackTriggerSource
+  mode   FeedbackTriggerMode   @default(CSAT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, source])
+  @@index([companyId])
+}
+
+model FeedbackSurvey {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  channel ConversationChannel?
+
+  assigneeId String?
+  assignee   User? @relation("FeedbackSurveyAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  type          FeedbackSurveyType
+  status        FeedbackSurveyStatus @default(PENDING)
+  triggerSource FeedbackTriggerSource
+  triggerEventKey String
+
+  tokenHash String @unique
+  expiresAt DateTime
+  sentAt    DateTime?
+  completedAt DateTime?
+
+  response   FeedbackResponse?
+  escalation FeedbackEscalation?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, status, createdAt])
+  @@index([companyId, type, status, createdAt])
+  @@index([companyId, triggerSource, triggerEventKey])
+  @@index([companyId, customerId])
+  @@index([conversationId])
+  @@index([ticketId])
+  @@index([assigneeId])
+}
+
+model FeedbackResponse {
+  id String @id @default(cuid())
+
+  surveyId String @unique
+  survey   FeedbackSurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  ticketId String?
+  ticket   Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  channel ConversationChannel?
+
+  assigneeId String?
+
+  type      FeedbackSurveyType
+  score     Int
+  comment   String?
+  sentiment FeedbackSentiment
+
+  submittedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  escalation FeedbackEscalation?
+
+  @@index([companyId])
+  @@index([companyId, type, submittedAt])
+  @@index([companyId, sentiment, submittedAt])
+  @@index([companyId, channel, submittedAt])
+  @@index([companyId, assigneeId, submittedAt])
+  @@index([companyId, customerId])
+  @@index([conversationId])
+  @@index([ticketId])
+}
+
+model FeedbackEscalation {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  surveyId String @unique
+  survey   FeedbackSurvey @relation(fields: [surveyId], references: [id], onDelete: Cascade)
+
+  responseId String @unique
+  response   FeedbackResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  status FeedbackEscalationStatus @default(OPEN)
+  reason String?
+
+  assignedToId String?
+  assignedTo   User? @relation("FeedbackEscalationAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, status, createdAt])
+  @@index([companyId, assignedToId, status])
 }
