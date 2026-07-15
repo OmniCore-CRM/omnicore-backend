@@ -92,6 +92,7 @@ type RequestOrigin = string | undefined;
 const WIDGET_ACCESS_ERROR = "Widget is not available";
 const WIDGET_MESSAGE_WINDOW_MS = 30 * 1000;
 const WIDGET_MESSAGE_WINDOW_MAX = 5;
+const WIDGET_MESSAGE_DEDUP_WINDOW_MS = 8 * 1000;
 const PUBLIC_ANSWER_TOKEN_LIMIT = 12;
 const PUBLIC_ANSWER_LIMIT = 3;
 
@@ -594,6 +595,29 @@ export class WidgetService {
       session.customerId
     );
 
+    const existingDuplicate = await prisma.message.findFirst({
+      where: {
+        companyId: session.companyId,
+        conversationId,
+        sender: MessageSender.CUSTOMER,
+        content: data.content,
+        createdAt: {
+          gte: new Date(Date.now() - WIDGET_MESSAGE_DEDUP_WINDOW_MS),
+        },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+
+    if (existingDuplicate) {
+      return mapPublicWidgetMessage(existingDuplicate);
+    }
+
+    // Resolve the automation actor before opening the transaction to keep
+    // transactional work minimal and avoid timeout pressure on ticket creation.
+    const automationActorId = await this.resolveWidgetAutomationActorId(
+      session.companyId
+    );
+
     const result = await prisma.$transaction(async (tx) => {
       const createdMessage = await tx.message.create({
         data: {
@@ -619,13 +643,24 @@ export class WidgetService {
         conversationId,
         messageContent: data.content,
         mode: "message",
+        actorId: automationActorId,
       });
 
       return {
         message: createdMessage,
         ticket,
       };
+    }, {
+      // Keep timeout modest: we reduced transaction scope first and only add
+      // a small headroom for production datastore variance.
+      timeout: 8_000,
+      maxWait: 5_000,
     });
+
+    const ticketForEvent = await this.getTicketForWidget(
+      session.companyId,
+      result.ticket.ticketId
+    );
 
     const messageDto = mapPublicWidgetMessage(result.message);
     const io = getIO();
@@ -638,10 +673,10 @@ export class WidgetService {
       "new_message",
       messageDto
     );
-    if (result.ticket.created) {
+    if (result.ticket.created && ticketForEvent) {
       io.to(`company:${session.companyId}`).emit(
         "ticket_created",
-        mapTicket(result.ticket.ticket)
+        mapTicket(ticketForEvent)
       );
     }
 
@@ -652,7 +687,7 @@ export class WidgetService {
       entityId: result.message.id,
       metadata: {
         conversationId,
-        ticketId: result.ticket.ticket.id,
+        ticketId: result.ticket.ticketId,
         ticketCreated: result.ticket.created,
       },
     });
@@ -824,7 +859,7 @@ export class WidgetService {
       messageContent: string;
       subject?: string;
       mode: "message";
-      actorId?: string;
+      actorId: string;
       slaPolicy?: {
         firstResponseMinutes: number;
         resolutionMinutes: number;
@@ -839,11 +874,8 @@ export class WidgetService {
           in: activeTicketStatuses,
         },
       },
-      include: {
-        assignee: { select: safeUserSelect },
-        createdBy: { select: safeUserSelect },
-        customer: true,
-        conversation: true,
+      select: {
+        id: true,
       },
       orderBy: [
         {
@@ -869,7 +901,7 @@ export class WidgetService {
         data: {
           companyId: input.companyId,
           ticketId: existingActiveTicket.id,
-          actorId: input.actorId ?? null,
+          actorId: input.actorId,
           action: TicketActivityAction.MESSAGE_RECEIVED_ON_WIDGET,
           metadata: {
             source: "widget",
@@ -879,21 +911,18 @@ export class WidgetService {
       });
 
       return {
-        ticket: existingActiveTicket,
+        ticketId: existingActiveTicket.id,
         created: false,
       };
     }
 
-    const createdById =
-      input.actorId ??
-      (await this.resolveWidgetAutomationActorId(input.companyId));
     const createdAt = new Date();
     const createdTicket = await tx.ticket.create({
       data: {
         companyId: input.companyId,
         customerId: input.customerId,
         conversationId: input.conversationId,
-        createdById,
+        createdById: input.actorId,
         subject: input.subject?.trim() || deriveTicketSubject(input.messageContent),
         description: input.messageContent,
         status: TicketStatus.OPEN,
@@ -909,11 +938,8 @@ export class WidgetService {
             }
           : {}),
       },
-      include: {
-        assignee: { select: safeUserSelect },
-        createdBy: { select: safeUserSelect },
-        customer: true,
-        conversation: true,
+      select: {
+        id: true,
       },
     });
 
@@ -936,9 +962,24 @@ export class WidgetService {
     });
 
     return {
-      ticket: createdTicket,
+      ticketId: createdTicket.id,
       created: true,
     };
+  }
+
+  private static async getTicketForWidget(companyId: string, ticketId: string) {
+    return prisma.ticket.findFirst({
+      where: {
+        id: ticketId,
+        companyId,
+      },
+      include: {
+        assignee: { select: safeUserSelect },
+        createdBy: { select: safeUserSelect },
+        customer: true,
+        conversation: true,
+      },
+    });
   }
 
   private static async createConversationFromPublicInput(input: {
@@ -1059,7 +1100,24 @@ export class WidgetService {
         message,
         ticket,
       };
-    }, { timeout: 15_000 });
+    }, { timeout: 15_000 }).then(async (result) => {
+      const fullTicket = await this.getTicketForWidget(
+        input.companyId,
+        result.ticket.ticketId
+      );
+
+      if (!fullTicket) {
+        throw new AppError("Ticket not found", HTTP_STATUS.NOT_FOUND);
+      }
+
+      return {
+        ...result,
+        ticket: {
+          ticket: fullTicket,
+          created: result.ticket.created,
+        },
+      };
+    });
   }
 
   private static async resolveWidgetAutomationActorId(companyId: string) {

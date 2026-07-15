@@ -861,6 +861,7 @@ export class FeedbackService {
               in: [
                 "FEEDBACK_SURVEY_DELIVERY_ATTEMPTED",
                 "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED",
+                "FEEDBACK_SURVEY_DELIVERY_CONFIRMED",
                 "FEEDBACK_SURVEY_DELIVERY_FAILED",
               ],
             },
@@ -900,7 +901,8 @@ export class FeedbackService {
           : null;
 
       const status =
-        log.action === "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED"
+        log.action === "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED" ||
+        log.action === "FEEDBACK_SURVEY_DELIVERY_CONFIRMED"
           ? "ACCEPTED"
           : log.action === "FEEDBACK_SURVEY_DELIVERY_FAILED"
             ? "FAILED"
@@ -936,21 +938,26 @@ export class FeedbackService {
         const canAttemptSend =
           Boolean(survey.conversationId) &&
           (survey.channel === ConversationChannel.WHATSAPP ||
-            survey.channel === ConversationChannel.EMAIL);
+            survey.channel === ConversationChannel.EMAIL ||
+            survey.channel === ConversationChannel.WEBSITE);
 
         const providerReady =
           survey.channel === ConversationChannel.WHATSAPP
             ? providerReadiness.whatsapp.productionReady
             : survey.channel === ConversationChannel.EMAIL
               ? providerReadiness.email.productionReady
-              : false;
+              : survey.channel === ConversationChannel.WEBSITE
+                ? true
+                : false;
 
         const providerReason =
           survey.channel === ConversationChannel.WHATSAPP
             ? providerReadiness.whatsapp.actionableErrors[0] ?? null
             : survey.channel === ConversationChannel.EMAIL
               ? providerReadiness.email.actionableErrors[0] ?? null
-              : "Provider not supported for this survey channel";
+              : survey.channel === ConversationChannel.WEBSITE
+                ? null
+                : "Provider not supported for this survey channel";
 
         return {
           id: survey.id,
@@ -1155,9 +1162,13 @@ export class FeedbackService {
     }
 
     const targetChannel = input.channel ?? survey.channel;
-    if (targetChannel !== ConversationChannel.WHATSAPP && targetChannel !== ConversationChannel.EMAIL) {
+    if (
+      targetChannel !== ConversationChannel.WHATSAPP &&
+      targetChannel !== ConversationChannel.EMAIL &&
+      targetChannel !== ConversationChannel.WEBSITE
+    ) {
       throw new AppError(
-        "Only WhatsApp or Email surveys can be sent via provider delivery",
+        "Only WhatsApp, Email, or Website surveys can be sent",
         HTTP_STATUS.BAD_REQUEST
       );
     }
@@ -1169,15 +1180,70 @@ export class FeedbackService {
       );
     }
 
+    const linkedConversation = await prisma.conversation.findFirst({
+      where: {
+        id: survey.conversationId,
+        companyId,
+      },
+      select: {
+        id: true,
+        channel: true,
+      },
+    });
+
+    if (!linkedConversation) {
+      throw new AppError(
+        "Linked conversation is unavailable. Use Copy link or Reissue and copy.",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    if (linkedConversation.channel !== targetChannel) {
+      throw new AppError(
+        "Linked conversation channel does not match this survey delivery channel",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const existingDeliveryMessage = await prisma.message.findFirst({
+      where: {
+        companyId,
+        conversationId: survey.conversationId,
+        sender: "AGENT",
+        metadata: {
+          path: ["feedbackSurveyId"],
+          equals: survey.id,
+        },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+
+    if (existingDeliveryMessage) {
+      return {
+        surveyId: survey.id,
+        channel: targetChannel,
+        accepted: true,
+        message: {
+          id: existingDeliveryMessage.id,
+          status: existingDeliveryMessage.status,
+          conversationId: existingDeliveryMessage.conversationId,
+        },
+      };
+    }
+
     const readiness = await ChannelService.getProviderReadiness(companyId);
     const providerReady =
       targetChannel === ConversationChannel.WHATSAPP
         ? readiness.whatsapp.productionReady
-        : readiness.email.productionReady;
+        : targetChannel === ConversationChannel.EMAIL
+          ? readiness.email.productionReady
+          : true;
     const providerReason =
       targetChannel === ConversationChannel.WHATSAPP
         ? readiness.whatsapp.actionableErrors[0] ?? "WhatsApp provider not ready"
-        : readiness.email.actionableErrors[0] ?? "Email provider not ready";
+        : targetChannel === ConversationChannel.EMAIL
+          ? readiness.email.actionableErrors[0] ?? "Email provider not ready"
+          : null;
 
     await AuditLogService.record({
       companyId,
@@ -1191,7 +1257,7 @@ export class FeedbackService {
       },
     });
 
-    if (!providerReady) {
+    if (!providerReady && providerReason) {
       await AuditLogService.record({
         companyId,
         actorId,
@@ -1238,7 +1304,10 @@ export class FeedbackService {
         await AuditLogService.record({
           companyId,
           actorId,
-          action: "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED",
+          action:
+            targetChannel === ConversationChannel.WEBSITE
+              ? "FEEDBACK_SURVEY_DELIVERY_CONFIRMED"
+              : "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED",
           entityType: "FEEDBACK_SURVEY",
           entityId: survey.id,
           metadata: {

@@ -82,7 +82,9 @@ export const feedbackSurveyReissueSchema = z.object({
 });
 
 export const feedbackSurveyDeliverySchema = z.object({
-  channel: z.enum([ConversationChannel.WHATSAPP, ConversationChannel.EMAIL]).optional(),
+  channel: z
+    .enum([ConversationChannel.WHATSAPP, ConversationChannel.EMAIL, ConversationChannel.WEBSITE])
+    .optional(),
 });
 
 export const updateFeedbackEscalationSchema = z.object({
