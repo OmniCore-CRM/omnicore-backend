@@ -105,6 +105,13 @@ type DateTeamCountRow = {
   count: number;
 };
 
+type DateTicketTrendRow = {
+  day: Date;
+  tickets: number;
+  resolvedTickets: number;
+  breachedTickets: number;
+};
+
 const toIsoDay = (value: Date) => value.toISOString().slice(0, 10);
 
 const safeNumber = (value: unknown) =>
@@ -313,17 +320,28 @@ export class AnalyticsService {
     AnalyticsOverviewCacheEntry
   >();
 
+  private static presetRangeBucket(windowTo: Date) {
+    const bucketStartMs =
+      Math.floor(windowTo.getTime() / analyticsOverviewCacheTtlMs) *
+      analyticsOverviewCacheTtlMs;
+    return new Date(bucketStartMs).toISOString();
+  }
+
   private static cacheKey(
     companyId: string,
     window: { range: AnalyticsOverviewRange; from: Date | null; to: Date },
     filters: AnalyticsFilters,
     comparePrevious: boolean
   ) {
+    const windowKey =
+      window.range === "custom"
+        ? `${window.from?.toISOString() ?? "null"}:${window.to.toISOString()}`
+        : `preset-bucket:${this.presetRangeBucket(window.to)}`;
+
     return [
       companyId,
       window.range,
-      window.from?.toISOString() ?? "null",
-      window.to.toISOString(),
+      windowKey,
       filters.teamId ?? "all-teams",
       filters.channel ?? "all-channels",
       filters.slaStatus ?? "all-sla",
@@ -360,12 +378,11 @@ export class AnalyticsService {
     };
 
     // Priority 1 optimization: Conservative parallelization in batches
-    // Batch 1: Simple counts (5 queries)
-    const [customerCount, attachmentCount, teamCount, conversationStatuses, ticketStatuses] =
+    // Batch 1: Simple counts and core status groups (4 queries)
+    const [customerCount, attachmentCount, conversationStatuses, ticketStatuses] =
       await Promise.all([
         prisma.customer.count({ where: customerWhere }),
         prisma.attachment.count({ where: attachmentWhere }),
-        prisma.team.count({ where: { companyId } }),
         prisma.conversation.groupBy({
           by: ["status"],
           where: conversationWhere,
@@ -432,60 +449,53 @@ export class AnalyticsService {
         fetchTicketTiming(companyId, window, filters),
       ]);
 
+    const teamCount = teams.length;
+
     // Agent performance and daily aggregates
     const agentPerformance = await fetchAgentPerformance(companyId, window, filters);
 
-    // Batch 4: Parallelize daily aggregates (7 queries)
-    // These were running sequentially; now parallelized in one Promise.all()
+    // Batch 4: Consolidated daily aggregates and team/channel trends
     const [
-      conversationDaily,
-      ticketDaily,
-      resolvedDaily,
-      breachedDaily,
+      ticketDailyTrends,
       channelDaily,
       ticketTeamDaily,
       conversationTeamDaily,
     ] = await Promise.all([
-      prisma.$queryRaw<DateCountRow[]>`
-        SELECT date_trunc('day', c."createdAt")::date AS "day", COUNT(*)::int AS "count"
-        FROM "Conversation" c
-        WHERE c."companyId" = ${companyId}
-          AND c."createdAt" <= ${window.to}
-          ${window.from ? Prisma.sql`AND c."createdAt" >= ${window.from}` : Prisma.empty}
-          ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
-          ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
-        GROUP BY 1
-      `,
-      prisma.$queryRaw<DateCountRow[]>`
-        SELECT date_trunc('day', t."createdAt")::date AS "day", COUNT(*)::int AS "count"
-        FROM "Ticket" t
-        LEFT JOIN "Conversation" c
-          ON c."id" = t."conversationId"
-         AND c."companyId" = t."companyId"
-        WHERE ${rawWhere("t", companyId, window, filters)}
-        GROUP BY 1
-      `,
-      prisma.$queryRaw<DateCountRow[]>`
-        SELECT date_trunc('day', t."resolvedAt")::date AS "day", COUNT(*)::int AS "count"
-        FROM "Ticket" t
-        LEFT JOIN "Conversation" c
-          ON c."id" = t."conversationId"
-         AND c."companyId" = t."companyId"
-        WHERE ${rawWhere("t", companyId, window, filters)}
-          AND t."resolvedAt" IS NOT NULL
-          AND t."resolvedAt" <= ${window.to}
-          ${window.from ? Prisma.sql`AND t."resolvedAt" >= ${window.from}` : Prisma.empty}
-        GROUP BY 1
-      `,
-      prisma.$queryRaw<DateCountRow[]>`
-        SELECT date_trunc('day', t."createdAt")::date AS "day", COUNT(*)::int AS "count"
-        FROM "Ticket" t
-        LEFT JOIN "Conversation" c
-          ON c."id" = t."conversationId"
-         AND c."companyId" = t."companyId"
-        WHERE ${rawWhere("t", companyId, window, filters)}
-          AND t."slaStatus" = 'BREACHED'
-        GROUP BY 1
+      prisma.$queryRaw<DateTicketTrendRow[]>`
+        WITH ticket_totals AS (
+          SELECT
+            date_trunc('day', t."createdAt")::date AS "day",
+            COUNT(*)::int AS "tickets",
+            COUNT(*) FILTER (WHERE t."slaStatus" = 'BREACHED')::int AS "breachedTickets"
+          FROM "Ticket" t
+          LEFT JOIN "Conversation" c
+            ON c."id" = t."conversationId"
+           AND c."companyId" = t."companyId"
+          WHERE ${rawWhere("t", companyId, window, filters)}
+          GROUP BY 1
+        ),
+        resolved_totals AS (
+          SELECT
+            date_trunc('day', t."resolvedAt")::date AS "day",
+            COUNT(*)::int AS "resolvedTickets"
+          FROM "Ticket" t
+          LEFT JOIN "Conversation" c
+            ON c."id" = t."conversationId"
+           AND c."companyId" = t."companyId"
+          WHERE ${rawWhere("t", companyId, window, filters)}
+            AND t."resolvedAt" IS NOT NULL
+            AND t."resolvedAt" <= ${window.to}
+            ${window.from ? Prisma.sql`AND t."resolvedAt" >= ${window.from}` : Prisma.empty}
+          GROUP BY 1
+        )
+        SELECT
+          COALESCE(tt."day", rt."day") AS "day",
+          COALESCE(tt."tickets", 0)::int AS "tickets",
+          COALESCE(rt."resolvedTickets", 0)::int AS "resolvedTickets",
+          COALESCE(tt."breachedTickets", 0)::int AS "breachedTickets"
+        FROM ticket_totals tt
+        FULL OUTER JOIN resolved_totals rt
+          ON rt."day" = tt."day"
       `,
       prisma.$queryRaw<DateChannelCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", c."channel" AS "channel", COUNT(*)::int AS "count"
@@ -580,10 +590,28 @@ export class AnalyticsService {
     }
 
     const buckets = dateBuckets(window.from, window.to);
-    const conversationDailyMap = toDailyMap(conversationDaily);
-    const ticketDailyMap = toDailyMap(ticketDaily);
-    const resolvedDailyMap = toDailyMap(resolvedDaily);
-    const breachedDailyMap = toDailyMap(breachedDaily);
+
+    const conversationDailyMap = new Map<string, number>();
+    const channelTrendMap = new Map<ConversationChannel, Map<string, number>>();
+    for (const row of channelDaily) {
+      const day = toIsoDay(row.day);
+      const count = Number(row.count);
+      conversationDailyMap.set(day, (conversationDailyMap.get(day) ?? 0) + count);
+
+      const byDate = channelTrendMap.get(row.channel) ?? new Map<string, number>();
+      byDate.set(day, count);
+      channelTrendMap.set(row.channel, byDate);
+    }
+
+    const ticketDailyMap = new Map<string, number>();
+    const resolvedDailyMap = new Map<string, number>();
+    const breachedDailyMap = new Map<string, number>();
+    for (const row of ticketDailyTrends) {
+      const day = toIsoDay(row.day);
+      ticketDailyMap.set(day, Number(row.tickets));
+      resolvedDailyMap.set(day, Number(row.resolvedTickets));
+      breachedDailyMap.set(day, Number(row.breachedTickets));
+    }
 
     const trendsDaily = buckets.map((date) => ({
       date,
@@ -592,13 +620,6 @@ export class AnalyticsService {
       resolvedTickets: resolvedDailyMap.get(date) ?? 0,
       breachedTickets: breachedDailyMap.get(date) ?? 0,
     }));
-
-    const channelTrendMap = new Map<ConversationChannel, Map<string, number>>();
-    for (const row of channelDaily) {
-      const byDate = channelTrendMap.get(row.channel) ?? new Map<string, number>();
-      byDate.set(toIsoDay(row.day), Number(row.count));
-      channelTrendMap.set(row.channel, byDate);
-    }
 
     const trendsChannels = Array.from(channelTrendMap.entries()).map(
       ([channel, byDate]) => ({
