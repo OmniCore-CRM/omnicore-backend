@@ -359,64 +359,84 @@ export class AnalyticsService {
       ...createdAtWhere(window.from, window.to),
     };
 
-    const customerCount = await prisma.customer.count({ where: customerWhere });
-    const conversationStatuses = await prisma.conversation.groupBy({
-      by: ["status"],
-      where: conversationWhere,
-      _count: { _all: true },
-    });
-    const ticketStatuses = await prisma.ticket.groupBy({
-      by: ["status"],
-      where: ticketWhere,
-      _count: { _all: true },
-    });
-    const attachmentCount = await prisma.attachment.count({ where: attachmentWhere });
-    const teamCount = await prisma.team.count({ where: { companyId } });
-    const conversationChannels = await prisma.conversation.groupBy({
-      by: ["channel"],
-      where: conversationWhere,
-      _count: { _all: true },
-    });
-    const ticketPriorities = await prisma.ticket.groupBy({
-      by: ["priority"],
-      where: ticketWhere,
-      _count: { _all: true },
-    });
-    const slaGroups = await prisma.ticket.groupBy({
-      by: ["slaStatus"],
-      where: ticketWhere,
-      _count: { _all: true },
-    });
-    const ticketsByTeam = await prisma.ticket.groupBy({
-      by: ["teamId"],
-      where: ticketWhere,
-      _count: { _all: true },
-    });
-    const conversationsByTeam = await prisma.conversation.groupBy({
-      by: ["teamId"],
-      where: conversationWhere,
-      _count: { _all: true },
-    });
-    const teams = await prisma.team.findMany({
-      where: { companyId },
-      select: { id: true, name: true },
-    });
-    const recentActivity = await prisma.auditLog.findMany({
-      where: auditWhere,
-      include: {
-        actor: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
+    // Priority 1 optimization: Conservative parallelization in batches
+    // Batch 1: Simple counts (5 queries)
+    const [customerCount, attachmentCount, teamCount, conversationStatuses, ticketStatuses] =
+      await Promise.all([
+        prisma.customer.count({ where: customerWhere }),
+        prisma.attachment.count({ where: attachmentWhere }),
+        prisma.team.count({ where: { companyId } }),
+        prisma.conversation.groupBy({
+          by: ["status"],
+          where: conversationWhere,
+          _count: { _all: true },
+        }),
+        prisma.ticket.groupBy({
+          by: ["status"],
+          where: ticketWhere,
+          _count: { _all: true },
+        }),
+      ]);
+
+    // Batch 2: GroupBy operations (4 queries)
+    const [conversationChannels, ticketPriorities, slaGroups, ticketsByTeam] =
+      await Promise.all([
+        prisma.conversation.groupBy({
+          by: ["channel"],
+          where: conversationWhere,
+          _count: { _all: true },
+        }),
+        prisma.ticket.groupBy({
+          by: ["priority"],
+          where: ticketWhere,
+          _count: { _all: true },
+        }),
+        prisma.ticket.groupBy({
+          by: ["slaStatus"],
+          where: ticketWhere,
+          _count: { _all: true },
+        }),
+        prisma.ticket.groupBy({
+          by: ["teamId"],
+          where: ticketWhere,
+          _count: { _all: true },
+        }),
+      ]);
+
+    // Batch 3: More queries and complex operations (3-4 queries)
+    const [conversationsByTeam, teams, recentActivity, ticketTiming] =
+      await Promise.all([
+        prisma.conversation.groupBy({
+          by: ["teamId"],
+          where: conversationWhere,
+          _count: { _all: true },
+        }),
+        prisma.team.findMany({
+          where: { companyId },
+          select: { id: true, name: true },
+        }),
+        prisma.auditLog.findMany({
+          where: auditWhere,
+          include: {
+            actor: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
-        },
-      },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 8,
-    });
-    const ticketTiming = await fetchTicketTiming(companyId, window, filters);
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 8,
+        }),
+        fetchTicketTiming(companyId, window, filters),
+      ]);
+
+    // Agent performance and daily aggregates
     const agentPerformance = await fetchAgentPerformance(companyId, window, filters);
+
+    // Batch 4: Daily aggregates and expensive queries (stay sequential or small batch)
+    // These are raw SQL queries that might compete for resources
     const conversationDaily = await prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Conversation" c
@@ -500,22 +520,25 @@ export class AnalyticsService {
     } | null = null;
 
     if (previousWindow) {
-      const prevConversationStatuses = await prisma.conversation.groupBy({
-        by: ["status"],
-        where: buildConversationWhere(companyId, previousWindow, filters),
-        _count: { _all: true },
-      });
-      const prevTicketStatuses = await prisma.ticket.groupBy({
-        by: ["status"],
-        where: buildTicketWhere(companyId, previousWindow, filters),
-        _count: { _all: true },
-      });
-      const prevSlaGroups = await prisma.ticket.groupBy({
-        by: ["slaStatus"],
-        where: buildTicketWhere(companyId, previousWindow, filters),
-        _count: { _all: true },
-      });
-      const prevTiming = await fetchTicketTiming(companyId, previousWindow, filters);
+      const [prevConversationStatuses, prevTicketStatuses, prevSlaGroups, prevTiming] =
+        await Promise.all([
+          prisma.conversation.groupBy({
+            by: ["status"],
+            where: buildConversationWhere(companyId, previousWindow, filters),
+            _count: { _all: true },
+          }),
+          prisma.ticket.groupBy({
+            by: ["status"],
+            where: buildTicketWhere(companyId, previousWindow, filters),
+            _count: { _all: true },
+          }),
+          prisma.ticket.groupBy({
+            by: ["slaStatus"],
+            where: buildTicketWhere(companyId, previousWindow, filters),
+            _count: { _all: true },
+          }),
+          fetchTicketTiming(companyId, previousWindow, filters),
+        ]);
 
       const prevTotalConversations = prevConversationStatuses.reduce(
         (total, group) => total + group._count._all,
