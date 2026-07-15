@@ -435,9 +435,18 @@ export class AnalyticsService {
     // Agent performance and daily aggregates
     const agentPerformance = await fetchAgentPerformance(companyId, window, filters);
 
-    // Batch 4: Daily aggregates and expensive queries (stay sequential or small batch)
-    // These are raw SQL queries that might compete for resources
-    const conversationDaily = await prisma.$queryRaw<DateCountRow[]>`
+    // Batch 4: Parallelize daily aggregates (7 queries)
+    // These were running sequentially; now parallelized in one Promise.all()
+    const [
+      conversationDaily,
+      ticketDaily,
+      resolvedDaily,
+      breachedDaily,
+      channelDaily,
+      ticketTeamDaily,
+      conversationTeamDaily,
+    ] = await Promise.all([
+      prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Conversation" c
         WHERE c."companyId" = ${companyId}
@@ -446,8 +455,8 @@ export class AnalyticsService {
           ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
           ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
         GROUP BY 1
-      `;
-    const ticketDaily = await prisma.$queryRaw<DateCountRow[]>`
+      `,
+      prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', t."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -455,8 +464,8 @@ export class AnalyticsService {
          AND c."companyId" = t."companyId"
         WHERE ${rawWhere("t", companyId, window, filters)}
         GROUP BY 1
-      `;
-    const resolvedDaily = await prisma.$queryRaw<DateCountRow[]>`
+      `,
+      prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', t."resolvedAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -467,8 +476,8 @@ export class AnalyticsService {
           AND t."resolvedAt" <= ${window.to}
           ${window.from ? Prisma.sql`AND t."resolvedAt" >= ${window.from}` : Prisma.empty}
         GROUP BY 1
-      `;
-    const breachedDaily = await prisma.$queryRaw<DateCountRow[]>`
+      `,
+      prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', t."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -477,8 +486,8 @@ export class AnalyticsService {
         WHERE ${rawWhere("t", companyId, window, filters)}
           AND t."slaStatus" = 'BREACHED'
         GROUP BY 1
-      `;
-    const channelDaily = await prisma.$queryRaw<DateChannelCountRow[]>`
+      `,
+      prisma.$queryRaw<DateChannelCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", c."channel" AS "channel", COUNT(*)::int AS "count"
         FROM "Conversation" c
         WHERE c."companyId" = ${companyId}
@@ -487,8 +496,8 @@ export class AnalyticsService {
           ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
           ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
         GROUP BY 1, 2
-      `;
-    const ticketTeamDaily = await prisma.$queryRaw<DateTeamCountRow[]>`
+      `,
+      prisma.$queryRaw<DateTeamCountRow[]>`
         SELECT date_trunc('day', t."createdAt")::date AS "day", t."teamId" AS "teamId", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -496,8 +505,8 @@ export class AnalyticsService {
          AND c."companyId" = t."companyId"
         WHERE ${rawWhere("t", companyId, window, filters)}
         GROUP BY 1, 2
-      `;
-    const conversationTeamDaily = await prisma.$queryRaw<DateTeamCountRow[]>`
+      `,
+      prisma.$queryRaw<DateTeamCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", c."teamId" AS "teamId", COUNT(*)::int AS "count"
         FROM "Conversation" c
         WHERE c."companyId" = ${companyId}
@@ -506,7 +515,8 @@ export class AnalyticsService {
           ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
           ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
         GROUP BY 1, 2
-      `;
+      `,
+    ]);
 
     let previousComparison: {
       from: Date;
