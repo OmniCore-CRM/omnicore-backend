@@ -359,90 +359,65 @@ export class AnalyticsService {
       ...createdAtWhere(window.from, window.to),
     };
 
-    // Priority 1 optimization: Parallelize all independent queries
-    // This reduces sequential await chain from ~20 queries to ~3 parallel batches
-    const [
-      customerCount,
-      conversationStatuses,
-      ticketStatuses,
-      attachmentCount,
-      teamCount,
-      conversationChannels,
-      ticketPriorities,
-      slaGroups,
-      ticketsByTeam,
-      conversationsByTeam,
-      teams,
-      recentActivity,
-      ticketTiming,
-      agentPerformance,
-      conversationDaily,
-      ticketDaily,
-      resolvedDaily,
-      breachedDaily,
-      channelDaily,
-      ticketTeamDaily,
-      conversationTeamDaily,
-    ] = await Promise.all([
-      prisma.customer.count({ where: customerWhere }),
-      prisma.conversation.groupBy({
-        by: ["status"],
-        where: conversationWhere,
-        _count: { _all: true },
-      }),
-      prisma.ticket.groupBy({
-        by: ["status"],
-        where: ticketWhere,
-        _count: { _all: true },
-      }),
-      prisma.attachment.count({ where: attachmentWhere }),
-      prisma.team.count({ where: { companyId } }),
-      prisma.conversation.groupBy({
-        by: ["channel"],
-        where: conversationWhere,
-        _count: { _all: true },
-      }),
-      prisma.ticket.groupBy({
-        by: ["priority"],
-        where: ticketWhere,
-        _count: { _all: true },
-      }),
-      prisma.ticket.groupBy({
-        by: ["slaStatus"],
-        where: ticketWhere,
-        _count: { _all: true },
-      }),
-      prisma.ticket.groupBy({
-        by: ["teamId"],
-        where: ticketWhere,
-        _count: { _all: true },
-      }),
-      prisma.conversation.groupBy({
-        by: ["teamId"],
-        where: conversationWhere,
-        _count: { _all: true },
-      }),
-      prisma.team.findMany({
-        where: { companyId },
-        select: { id: true, name: true },
-      }),
-      prisma.auditLog.findMany({
-        where: auditWhere,
-        include: {
-          actor: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-            },
+    const customerCount = await prisma.customer.count({ where: customerWhere });
+    const conversationStatuses = await prisma.conversation.groupBy({
+      by: ["status"],
+      where: conversationWhere,
+      _count: { _all: true },
+    });
+    const ticketStatuses = await prisma.ticket.groupBy({
+      by: ["status"],
+      where: ticketWhere,
+      _count: { _all: true },
+    });
+    const attachmentCount = await prisma.attachment.count({ where: attachmentWhere });
+    const teamCount = await prisma.team.count({ where: { companyId } });
+    const conversationChannels = await prisma.conversation.groupBy({
+      by: ["channel"],
+      where: conversationWhere,
+      _count: { _all: true },
+    });
+    const ticketPriorities = await prisma.ticket.groupBy({
+      by: ["priority"],
+      where: ticketWhere,
+      _count: { _all: true },
+    });
+    const slaGroups = await prisma.ticket.groupBy({
+      by: ["slaStatus"],
+      where: ticketWhere,
+      _count: { _all: true },
+    });
+    const ticketsByTeam = await prisma.ticket.groupBy({
+      by: ["teamId"],
+      where: ticketWhere,
+      _count: { _all: true },
+    });
+    const conversationsByTeam = await prisma.conversation.groupBy({
+      by: ["teamId"],
+      where: conversationWhere,
+      _count: { _all: true },
+    });
+    const teams = await prisma.team.findMany({
+      where: { companyId },
+      select: { id: true, name: true },
+    });
+    const recentActivity = await prisma.auditLog.findMany({
+      where: auditWhere,
+      include: {
+        actor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
           },
         },
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: 8,
-      }),
-      fetchTicketTiming(companyId, window, filters),
-      fetchAgentPerformance(companyId, window, filters),
-      prisma.$queryRaw<DateCountRow[]>`
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 8,
+    });
+    const ticketTiming = await fetchTicketTiming(companyId, window, filters);
+    const agentPerformance = await fetchAgentPerformance(companyId, window, filters);
+    const conversationDaily = await prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Conversation" c
         WHERE c."companyId" = ${companyId}
@@ -451,8 +426,8 @@ export class AnalyticsService {
           ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
           ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
         GROUP BY 1
-      `,
-      prisma.$queryRaw<DateCountRow[]>`
+      `;
+    const ticketDaily = await prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', t."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -460,8 +435,8 @@ export class AnalyticsService {
          AND c."companyId" = t."companyId"
         WHERE ${rawWhere("t", companyId, window, filters)}
         GROUP BY 1
-      `,
-      prisma.$queryRaw<DateCountRow[]>`
+      `;
+    const resolvedDaily = await prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', t."resolvedAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -472,8 +447,8 @@ export class AnalyticsService {
           AND t."resolvedAt" <= ${window.to}
           ${window.from ? Prisma.sql`AND t."resolvedAt" >= ${window.from}` : Prisma.empty}
         GROUP BY 1
-      `,
-      prisma.$queryRaw<DateCountRow[]>`
+      `;
+    const breachedDaily = await prisma.$queryRaw<DateCountRow[]>`
         SELECT date_trunc('day', t."createdAt")::date AS "day", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -482,8 +457,8 @@ export class AnalyticsService {
         WHERE ${rawWhere("t", companyId, window, filters)}
           AND t."slaStatus" = 'BREACHED'
         GROUP BY 1
-      `,
-      prisma.$queryRaw<DateChannelCountRow[]>`
+      `;
+    const channelDaily = await prisma.$queryRaw<DateChannelCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", c."channel" AS "channel", COUNT(*)::int AS "count"
         FROM "Conversation" c
         WHERE c."companyId" = ${companyId}
@@ -492,8 +467,8 @@ export class AnalyticsService {
           ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
           ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
         GROUP BY 1, 2
-      `,
-      prisma.$queryRaw<DateTeamCountRow[]>`
+      `;
+    const ticketTeamDaily = await prisma.$queryRaw<DateTeamCountRow[]>`
         SELECT date_trunc('day', t."createdAt")::date AS "day", t."teamId" AS "teamId", COUNT(*)::int AS "count"
         FROM "Ticket" t
         LEFT JOIN "Conversation" c
@@ -501,8 +476,8 @@ export class AnalyticsService {
          AND c."companyId" = t."companyId"
         WHERE ${rawWhere("t", companyId, window, filters)}
         GROUP BY 1, 2
-      `,
-      prisma.$queryRaw<DateTeamCountRow[]>`
+      `;
+    const conversationTeamDaily = await prisma.$queryRaw<DateTeamCountRow[]>`
         SELECT date_trunc('day', c."createdAt")::date AS "day", c."teamId" AS "teamId", COUNT(*)::int AS "count"
         FROM "Conversation" c
         WHERE c."companyId" = ${companyId}
@@ -511,8 +486,7 @@ export class AnalyticsService {
           ${filters.teamId ? Prisma.sql`AND c."teamId" = ${filters.teamId}` : Prisma.empty}
           ${filters.channel ? Prisma.sql`AND c."channel" = ${filters.channel}::"ConversationChannel"` : Prisma.empty}
         GROUP BY 1, 2
-      `,
-    ]);
+      `;
 
     let previousComparison: {
       from: Date;
@@ -526,26 +500,22 @@ export class AnalyticsService {
     } | null = null;
 
     if (previousWindow) {
-      // Parallelize comparison period queries
-      const [prevConversationStatuses, prevTicketStatuses, prevSlaGroups, prevTiming] =
-        await Promise.all([
-          prisma.conversation.groupBy({
-            by: ["status"],
-            where: buildConversationWhere(companyId, previousWindow, filters),
-            _count: { _all: true },
-          }),
-          prisma.ticket.groupBy({
-            by: ["status"],
-            where: buildTicketWhere(companyId, previousWindow, filters),
-            _count: { _all: true },
-          }),
-          prisma.ticket.groupBy({
-            by: ["slaStatus"],
-            where: buildTicketWhere(companyId, previousWindow, filters),
-            _count: { _all: true },
-          }),
-          fetchTicketTiming(companyId, previousWindow, filters),
-        ]);
+      const prevConversationStatuses = await prisma.conversation.groupBy({
+        by: ["status"],
+        where: buildConversationWhere(companyId, previousWindow, filters),
+        _count: { _all: true },
+      });
+      const prevTicketStatuses = await prisma.ticket.groupBy({
+        by: ["status"],
+        where: buildTicketWhere(companyId, previousWindow, filters),
+        _count: { _all: true },
+      });
+      const prevSlaGroups = await prisma.ticket.groupBy({
+        by: ["slaStatus"],
+        where: buildTicketWhere(companyId, previousWindow, filters),
+        _count: { _all: true },
+      });
+      const prevTiming = await fetchTicketTiming(companyId, previousWindow, filters);
 
       const prevTotalConversations = prevConversationStatuses.reduce(
         (total, group) => total + group._count._all,
