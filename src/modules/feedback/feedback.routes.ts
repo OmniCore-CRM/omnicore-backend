@@ -5,6 +5,8 @@ import { validateRequest } from "@/core/middleware/validate.middleware.js";
 import { rateLimit } from "@/core/middleware/rate-limit.middleware.js";
 import { FeedbackController } from "./feedback.controller.js";
 import {
+  feedbackSurveyDeliverySchema,
+  feedbackSurveyReissueSchema,
   submitFeedbackResponseSchema,
   updateFeedbackTriggerConfigSchema,
 } from "./feedback.validation.js";
@@ -41,6 +43,36 @@ router.get(
   protect,
   authorize(...RBAC.readOnly),
   FeedbackController.getDetractors
+);
+
+router.get(
+  "/pending-surveys",
+  protect,
+  authorize(...RBAC.readOnly),
+  FeedbackController.getPendingSurveys
+);
+
+router.post(
+  "/pending-surveys/:id/reveal-link",
+  protect,
+  authorize(...RBAC.operational),
+  FeedbackController.revealPendingSurveyLink
+);
+
+router.post(
+  "/pending-surveys/:id/reissue-token",
+  protect,
+  authorize(...RBAC.operational),
+  validateRequest(feedbackSurveyReissueSchema),
+  FeedbackController.reissuePendingSurveyToken
+);
+
+router.post(
+  "/pending-surveys/:id/deliver",
+  protect,
+  authorize(...RBAC.operational),
+  validateRequest(feedbackSurveyDeliverySchema),
+  FeedbackController.deliverPendingSurvey
 );
 
 router.get(

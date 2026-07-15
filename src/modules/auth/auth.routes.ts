@@ -82,8 +82,11 @@ router.post(
 router.post(
   "/refresh",
   rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 120,
+    // Refresh uses HttpOnly cookie rotation and may burst during hard reloads
+    // across multiple protected routes/tabs. Keep guardrails, but avoid
+    // throttling valid sessions into false logout paths.
+    windowMs: 5 * 60 * 1000,
+    max: 600,
     keyPrefix: "auth:refresh",
   }),
   AuthController.refresh

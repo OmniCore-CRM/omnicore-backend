@@ -553,6 +553,12 @@ async function main() {
     email: "nina.demo@example.com",
     phone: "+15550001003",
   });
+  const elena = await getOrCreateCustomer(company.id, {
+    firstName: "Elena",
+    lastName: "Meyer",
+    email: "elena.demo@example.com",
+    phone: "+15550001004",
+  });
 
   const whatsappConversation = await getOrCreateConversation(
     company.id,
@@ -587,6 +593,17 @@ async function main() {
       teamId: escalationsTeam.id,
     }
   );
+  const emailConversation = await getOrCreateConversation(
+    company.id,
+    elena.id,
+    {
+      channel: ConversationChannel.EMAIL,
+      status: ConversationStatus.OPEN,
+      subject: "Invoice copy request",
+      assigneeId: agent.id,
+      teamId: supportTeam.id,
+    }
+  );
 
   await ensureMessage(company.id, whatsappConversation.id, {
     sender: MessageSender.CUSTOMER,
@@ -617,6 +634,18 @@ async function main() {
     content: "This is an example failed outbound WhatsApp message.",
     status: MessageStatus.FAILED,
     provider: ConversationChannel.WHATSAPP,
+  });
+  await ensureMessage(company.id, emailConversation.id, {
+    sender: MessageSender.CUSTOMER,
+    content: "Hi support, could you resend my latest invoice PDF?",
+    status: MessageStatus.READ,
+    provider: ConversationChannel.EMAIL,
+  });
+  await ensureMessage(company.id, emailConversation.id, {
+    sender: MessageSender.AGENT,
+    content: "Absolutely, I can help with that. Please confirm the billing month.",
+    status: MessageStatus.SENT,
+    provider: ConversationChannel.EMAIL,
   });
 
   const openTicket = await getOrCreateTicket(company.id, owner.id, {
@@ -649,6 +678,16 @@ async function main() {
     assigneeId: admin.id,
     teamId: escalationsTeam.id,
   });
+  const emailTicket = await getOrCreateTicket(company.id, owner.id, {
+    subject: "Invoice copy request",
+    description: "Elena asked support to resend a recent invoice over email.",
+    status: TicketStatus.OPEN,
+    priority: TicketPriority.MEDIUM,
+    customerId: elena.id,
+    conversationId: emailConversation.id,
+    assigneeId: agent.id,
+    teamId: supportTeam.id,
+  });
 
   await ensureTicketNote(
     company.id,
@@ -667,6 +706,12 @@ async function main() {
     escalatedTicket.id,
     owner.id,
     "Demo note: urgent staging ticket for escalation-style review."
+  );
+  await ensureTicketNote(
+    company.id,
+    emailTicket.id,
+    agent.id,
+    "Demo note: resolve this email ticket to trigger Phase 4 email survey testing."
   );
 
   console.log("Seeded OmniCore staging demo data.");

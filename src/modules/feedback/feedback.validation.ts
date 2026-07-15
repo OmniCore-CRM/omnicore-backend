@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ConversationChannel,
   FeedbackEscalationStatus,
+  FeedbackSurveyStatus,
   FeedbackSurveyType,
   FeedbackTriggerMode,
   FeedbackTriggerSource,
@@ -64,6 +65,26 @@ export const feedbackDetractorsQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(20),
 });
 
+export const feedbackPendingSurveysQuerySchema = z.object({
+  status: z
+    .enum([FeedbackSurveyStatus.PENDING, FeedbackSurveyStatus.SENT, FeedbackSurveyStatus.EXPIRED])
+    .optional(),
+  cursor: z.string().trim().min(1).max(128).optional(),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+
+export const feedbackSurveyParamsSchema = z.object({
+  id: z.string().trim().min(1).max(128),
+});
+
+export const feedbackSurveyReissueSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
+export const feedbackSurveyDeliverySchema = z.object({
+  channel: z.enum([ConversationChannel.WHATSAPP, ConversationChannel.EMAIL]).optional(),
+});
+
 export const updateFeedbackEscalationSchema = z.object({
   status: z.enum(FeedbackEscalationStatus),
   assignedToId: z.string().trim().min(1).max(128).nullable().optional(),
@@ -105,12 +126,24 @@ export type FeedbackDetractorsQueryInput = z.infer<
   typeof feedbackDetractorsQuerySchema
 >;
 
+export type FeedbackPendingSurveysQueryInput = z.infer<
+  typeof feedbackPendingSurveysQuerySchema
+>;
+
 export type UpdateFeedbackEscalationInput = z.infer<
   typeof updateFeedbackEscalationSchema
 >;
 
 export type SubmitFeedbackResponseInput = z.infer<
   typeof submitFeedbackResponseSchema
+>;
+
+export type FeedbackSurveyReissueInput = z.infer<
+  typeof feedbackSurveyReissueSchema
+>;
+
+export type FeedbackSurveyDeliveryInput = z.infer<
+  typeof feedbackSurveyDeliverySchema
 >;
 
 export type UpdateFeedbackTriggerConfigInput = z.infer<

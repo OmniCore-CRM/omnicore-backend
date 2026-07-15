@@ -7,15 +7,19 @@ import {
   FeedbackSurveyType,
   FeedbackTriggerMode,
   FeedbackTriggerSource,
+  MessageStatus,
   NotificationType,
   Prisma,
   UserLifecycleStatus,
 } from "@prisma/client";
 import { prisma } from "@/config/db.js";
+import { env } from "@/config/env.js";
 import { AppError } from "@/core/errors/app-error.js";
 import { HTTP_STATUS } from "@/core/constants/http-status.js";
 import { toPaginatedResult } from "@/core/utils/pagination.js";
 import { AuditLogService } from "@/modules/audit-logs/audit-log.service.js";
+import { ChannelService } from "@/modules/channels/channel.service.js";
+import { MessageService } from "@/modules/messages/message.service.js";
 import { NotificationService } from "@/modules/notifications/notification.service.js";
 import {
   mapFeedbackEscalation,
@@ -24,6 +28,9 @@ import {
 } from "./feedback.mapper.js";
 import type {
   CreateFeedbackSurveyFromEventInput,
+  FeedbackPendingSurveysQueryInput,
+  FeedbackSurveyDeliveryInput,
+  FeedbackSurveyReissueInput,
   FeedbackDetractorsQueryInput,
   FeedbackOverviewQueryInput,
   SubmitFeedbackResponseInput,
@@ -38,6 +45,51 @@ const rangeDays = {
 } as const;
 
 const SURVEY_EXPIRY_DAYS = 14;
+const SURVEY_LINK_HANDOFF_WINDOW_MS = 30 * 60 * 1000;
+
+type SurveyLinkHandoff = {
+  token: string;
+  url: string;
+  expiresAtMs: number;
+};
+
+const surveyLinkHandoff = new Map<string, SurveyLinkHandoff>();
+
+const appWebBaseUrl = () => env.APP_ORIGINS[0] ?? "http://localhost:3000";
+
+const handoffKey = (companyId: string, surveyId: string) => `${companyId}:${surveyId}`;
+
+const cleanupHandoffLinks = () => {
+  const now = Date.now();
+  for (const [key, entry] of surveyLinkHandoff.entries()) {
+    if (entry.expiresAtMs <= now) {
+      surveyLinkHandoff.delete(key);
+    }
+  }
+};
+
+const storeHandoffLink = (input: {
+  companyId: string;
+  surveyId: string;
+  token: string;
+  surveyExpiresAt: Date;
+}) => {
+  cleanupHandoffLinks();
+  const windowEnd = Date.now() + SURVEY_LINK_HANDOFF_WINDOW_MS;
+  const expiresAtMs = Math.min(windowEnd, input.surveyExpiresAt.getTime());
+  const url = FeedbackService.buildSurveyPublicUrl(appWebBaseUrl(), input.token);
+
+  surveyLinkHandoff.set(handoffKey(input.companyId, input.surveyId), {
+    token: input.token,
+    url,
+    expiresAtMs,
+  });
+};
+
+const getHandoffLink = (companyId: string, surveyId: string) => {
+  cleanupHandoffLinks();
+  return surveyLinkHandoff.get(handoffKey(companyId, surveyId)) ?? null;
+};
 
 const defaultModeBySource: Record<FeedbackTriggerSource, FeedbackTriggerMode> = {
   [FeedbackTriggerSource.TICKET_RESOLVED]: FeedbackTriggerMode.CSAT,
@@ -241,6 +293,12 @@ export class FeedbackService {
       });
 
       created.push({ token, survey });
+      storeHandoffLink({
+        companyId: input.companyId,
+        surveyId: survey.id,
+        token,
+        surveyExpiresAt: survey.expiresAt,
+      });
 
       await AuditLogService.record({
         companyId: input.companyId,
@@ -752,6 +810,482 @@ export class FeedbackService {
       ...page,
       items: page.items,
     };
+  }
+
+  static async getPendingSurveys(companyId: string, query: FeedbackPendingSurveysQueryInput) {
+    const surveys = await prisma.feedbackSurvey.findMany({
+      where: {
+        companyId,
+        completedAt: null,
+        response: null,
+        status: query.status
+          ? query.status
+          : {
+              in: [
+                FeedbackSurveyStatus.PENDING,
+                FeedbackSurveyStatus.SENT,
+                FeedbackSurveyStatus.EXPIRED,
+              ],
+            },
+      },
+      include: {
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: query.limit + 1,
+      ...(query.cursor
+        ? {
+            cursor: { id: query.cursor },
+            skip: 1,
+          }
+        : {}),
+    });
+
+    const page = toPaginatedResult(surveys, query.limit);
+    const surveyIds = page.items.map((item) => item.id);
+
+    const deliveryAudit = surveyIds.length
+      ? await prisma.auditLog.findMany({
+          where: {
+            companyId,
+            entityType: "FEEDBACK_SURVEY",
+            entityId: { in: surveyIds },
+            action: {
+              in: [
+                "FEEDBACK_SURVEY_DELIVERY_ATTEMPTED",
+                "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED",
+                "FEEDBACK_SURVEY_DELIVERY_FAILED",
+              ],
+            },
+          },
+          select: {
+            entityId: true,
+            action: true,
+            metadata: true,
+            createdAt: true,
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        })
+      : [];
+
+    const latestDeliveryBySurvey = new Map<
+      string,
+      {
+        status: "NOT_ATTEMPTED" | "ATTEMPTED" | "ACCEPTED" | "FAILED";
+        attemptedAt: string | null;
+        channel: ConversationChannel | null;
+        detail: string | null;
+      }
+    >();
+
+    for (const log of deliveryAudit) {
+      if (latestDeliveryBySurvey.has(log.entityId)) continue;
+
+      const metadata = (log.metadata && typeof log.metadata === "object"
+        ? (log.metadata as Record<string, unknown>)
+        : {}) as Record<string, unknown>;
+      const channel =
+        metadata.channel === ConversationChannel.WHATSAPP ||
+        metadata.channel === ConversationChannel.EMAIL ||
+        metadata.channel === ConversationChannel.WEBSITE ||
+        metadata.channel === ConversationChannel.INSTAGRAM
+          ? metadata.channel
+          : null;
+
+      const status =
+        log.action === "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED"
+          ? "ACCEPTED"
+          : log.action === "FEEDBACK_SURVEY_DELIVERY_FAILED"
+            ? "FAILED"
+            : "ATTEMPTED";
+
+      latestDeliveryBySurvey.set(log.entityId, {
+        status,
+        attemptedAt: log.createdAt.toISOString(),
+        channel,
+        detail:
+          typeof metadata.reason === "string"
+            ? metadata.reason
+            : typeof metadata.providerStatus === "string"
+              ? metadata.providerStatus
+              : null,
+      });
+    }
+
+    const providerReadiness = await ChannelService.getProviderReadiness(companyId);
+
+    return {
+      ...page,
+      items: page.items.map((survey) => {
+        const handoff = getHandoffLink(companyId, survey.id);
+        const delivery =
+          latestDeliveryBySurvey.get(survey.id) ?? {
+            status: "NOT_ATTEMPTED" as const,
+            attemptedAt: null,
+            channel: null,
+            detail: null,
+          };
+
+        const canAttemptSend =
+          Boolean(survey.conversationId) &&
+          (survey.channel === ConversationChannel.WHATSAPP ||
+            survey.channel === ConversationChannel.EMAIL);
+
+        const providerReady =
+          survey.channel === ConversationChannel.WHATSAPP
+            ? providerReadiness.whatsapp.productionReady
+            : survey.channel === ConversationChannel.EMAIL
+              ? providerReadiness.email.productionReady
+              : false;
+
+        const providerReason =
+          survey.channel === ConversationChannel.WHATSAPP
+            ? providerReadiness.whatsapp.actionableErrors[0] ?? null
+            : survey.channel === ConversationChannel.EMAIL
+              ? providerReadiness.email.actionableErrors[0] ?? null
+              : "Provider not supported for this survey channel";
+
+        return {
+          id: survey.id,
+          type: survey.type,
+          status: survey.status,
+          triggerSource: survey.triggerSource,
+          customer: survey.customer,
+          channel: survey.channel,
+          ticketId: survey.ticketId,
+          conversationId: survey.conversationId,
+          createdAt: survey.createdAt,
+          expiresAt: survey.expiresAt,
+          handoff: {
+            linkAvailable: Boolean(handoff),
+            handoffExpiresAt: handoff ? new Date(handoff.expiresAtMs).toISOString() : null,
+          },
+          delivery,
+          sendCapabilities: {
+            canAttemptSend,
+            providerReady,
+            providerReason: providerReady ? null : providerReason,
+          },
+        };
+      }),
+      providerReadiness,
+    };
+  }
+
+  static async revealPendingSurveyLink(companyId: string, actorId: string, surveyId: string) {
+    const survey = await prisma.feedbackSurvey.findFirst({
+      where: {
+        id: surveyId,
+        companyId,
+      },
+      select: {
+        id: true,
+        status: true,
+        completedAt: true,
+      },
+    });
+
+    if (!survey) {
+      throw new AppError("Feedback survey not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (survey.completedAt || survey.status === FeedbackSurveyStatus.COMPLETED) {
+      throw new AppError("Cannot reveal link for a completed survey", HTTP_STATUS.CONFLICT);
+    }
+
+    const handoff = getHandoffLink(companyId, survey.id);
+    if (!handoff) {
+      throw new AppError(
+        "Raw survey link is no longer available. Reissue token to generate a new link.",
+        HTTP_STATUS.CONFLICT
+      );
+    }
+
+    await AuditLogService.record({
+      companyId,
+      actorId,
+      action: "FEEDBACK_SURVEY_LINK_REVEALED",
+      entityType: "FEEDBACK_SURVEY",
+      entityId: survey.id,
+      metadata: {
+        handoffExpiresAt: new Date(handoff.expiresAtMs).toISOString(),
+      },
+    });
+
+    return {
+      surveyId: survey.id,
+      url: handoff.url,
+      expiresAt: new Date(handoff.expiresAtMs).toISOString(),
+    };
+  }
+
+  static async reissuePendingSurveyToken(
+    companyId: string,
+    actorId: string,
+    surveyId: string,
+    input: FeedbackSurveyReissueInput
+  ) {
+    const now = new Date();
+    const token = generateSurveyToken();
+    const tokenHash = hashToken(token);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.feedbackSurvey.findFirst({
+        where: {
+          id: surveyId,
+          companyId,
+        },
+        include: {
+          response: {
+            select: { id: true },
+          },
+        },
+      });
+
+      if (!existing) {
+        throw new AppError("Feedback survey not found", HTTP_STATUS.NOT_FOUND);
+      }
+
+      if (existing.response || existing.completedAt || existing.status === FeedbackSurveyStatus.COMPLETED) {
+        throw new AppError("Cannot reissue token for a completed survey", HTTP_STATUS.CONFLICT);
+      }
+
+      const nextExpiry =
+        existing.expiresAt.getTime() <= now.getTime()
+          ? new Date(now.getTime() + SURVEY_EXPIRY_DAYS * 24 * 60 * 60 * 1000)
+          : existing.expiresAt;
+
+      return tx.feedbackSurvey.update({
+        where: { id: existing.id },
+        data: {
+          tokenHash,
+          status: FeedbackSurveyStatus.SENT,
+          sentAt: now,
+          completedAt: null,
+          expiresAt: nextExpiry,
+        },
+      });
+    });
+
+    storeHandoffLink({
+      companyId,
+      surveyId: updated.id,
+      token,
+      surveyExpiresAt: updated.expiresAt,
+    });
+
+    const handoff = getHandoffLink(companyId, updated.id);
+    if (!handoff) {
+      throw new AppError("Could not prepare survey link handoff", HTTP_STATUS.INTERNAL_SERVER_ERROR);
+    }
+
+    await AuditLogService.record({
+      companyId,
+      actorId,
+      action: "FEEDBACK_SURVEY_TOKEN_REISSUED",
+      entityType: "FEEDBACK_SURVEY",
+      entityId: updated.id,
+      metadata: {
+        reason: input.reason ?? "operator_reissue",
+        expiresAt: updated.expiresAt.toISOString(),
+      },
+    });
+
+    return {
+      surveyId: updated.id,
+      status: updated.status,
+      url: handoff.url,
+      expiresAt: updated.expiresAt.toISOString(),
+      handoffExpiresAt: new Date(handoff.expiresAtMs).toISOString(),
+    };
+  }
+
+  static async deliverPendingSurvey(
+    companyId: string,
+    actorId: string,
+    surveyId: string,
+    input: FeedbackSurveyDeliveryInput
+  ) {
+    const survey = await prisma.feedbackSurvey.findFirst({
+      where: {
+        id: surveyId,
+        companyId,
+      },
+      include: {
+        response: {
+          select: { id: true },
+        },
+        customer: {
+          select: {
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    if (!survey) {
+      throw new AppError("Feedback survey not found", HTTP_STATUS.NOT_FOUND);
+    }
+
+    if (survey.response || survey.completedAt || survey.status === FeedbackSurveyStatus.COMPLETED) {
+      throw new AppError("Cannot deliver a completed survey", HTTP_STATUS.CONFLICT);
+    }
+
+    if (!survey.conversationId) {
+      throw new AppError(
+        "Survey is not linked to a provider-backed conversation. Use Copy link.",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const handoff = getHandoffLink(companyId, survey.id);
+    if (!handoff) {
+      throw new AppError(
+        "Raw survey link is no longer available. Reissue token to deliver.",
+        HTTP_STATUS.CONFLICT
+      );
+    }
+
+    const targetChannel = input.channel ?? survey.channel;
+    if (targetChannel !== ConversationChannel.WHATSAPP && targetChannel !== ConversationChannel.EMAIL) {
+      throw new AppError(
+        "Only WhatsApp or Email surveys can be sent via provider delivery",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    if (targetChannel !== survey.channel) {
+      throw new AppError(
+        "Requested delivery channel does not match the survey conversation channel",
+        HTTP_STATUS.BAD_REQUEST
+      );
+    }
+
+    const readiness = await ChannelService.getProviderReadiness(companyId);
+    const providerReady =
+      targetChannel === ConversationChannel.WHATSAPP
+        ? readiness.whatsapp.productionReady
+        : readiness.email.productionReady;
+    const providerReason =
+      targetChannel === ConversationChannel.WHATSAPP
+        ? readiness.whatsapp.actionableErrors[0] ?? "WhatsApp provider not ready"
+        : readiness.email.actionableErrors[0] ?? "Email provider not ready";
+
+    await AuditLogService.record({
+      companyId,
+      actorId,
+      action: "FEEDBACK_SURVEY_DELIVERY_ATTEMPTED",
+      entityType: "FEEDBACK_SURVEY",
+      entityId: survey.id,
+      metadata: {
+        channel: targetChannel,
+        conversationId: survey.conversationId,
+      },
+    });
+
+    if (!providerReady) {
+      await AuditLogService.record({
+        companyId,
+        actorId,
+        action: "FEEDBACK_SURVEY_DELIVERY_FAILED",
+        entityType: "FEEDBACK_SURVEY",
+        entityId: survey.id,
+        metadata: {
+          channel: targetChannel,
+          reason: providerReason,
+        },
+      });
+
+      throw new AppError(providerReason, HTTP_STATUS.BAD_REQUEST);
+    }
+
+    const customerName = [survey.customer.firstName, survey.customer.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const greeting = customerName ? `Hi ${customerName},` : "Hi there,";
+    const content = `${greeting} we'd value your feedback: ${handoff.url}`;
+
+    try {
+      const message = await MessageService.createMessage(
+        { companyId, userId: actorId },
+        {
+          conversationId: survey.conversationId,
+          sender: "AGENT",
+          content,
+          metadata: {
+            feedbackSurveyId: survey.id,
+            feedbackSurveyType: survey.type,
+            feedbackDelivery: true,
+          },
+        }
+      );
+
+      const accepted =
+        message.status === MessageStatus.SENT ||
+        message.status === MessageStatus.DELIVERED ||
+        message.status === MessageStatus.READ;
+
+      if (accepted) {
+        await AuditLogService.record({
+          companyId,
+          actorId,
+          action: "FEEDBACK_SURVEY_DELIVERY_PROVIDER_ACCEPTED",
+          entityType: "FEEDBACK_SURVEY",
+          entityId: survey.id,
+          metadata: {
+            channel: targetChannel,
+            messageId: message.id,
+            messageStatus: message.status,
+          },
+        });
+      } else {
+        await AuditLogService.record({
+          companyId,
+          actorId,
+          action: "FEEDBACK_SURVEY_DELIVERY_FAILED",
+          entityType: "FEEDBACK_SURVEY",
+          entityId: survey.id,
+          metadata: {
+            channel: targetChannel,
+            messageId: message.id,
+            reason: `provider_status_${message.status}`,
+          },
+        });
+      }
+
+      return {
+        surveyId: survey.id,
+        channel: targetChannel,
+        accepted,
+        message: {
+          id: message.id,
+          status: message.status,
+          conversationId: message.conversationId,
+        },
+      };
+    } catch (error) {
+      await AuditLogService.record({
+        companyId,
+        actorId,
+        action: "FEEDBACK_SURVEY_DELIVERY_FAILED",
+        entityType: "FEEDBACK_SURVEY",
+        entityId: survey.id,
+        metadata: {
+          channel: targetChannel,
+          reason: error instanceof Error ? error.message : "delivery_error",
+        },
+      });
+      throw error;
+    }
   }
 
   static async updateEscalation(

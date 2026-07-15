@@ -6,7 +6,11 @@ import type { AuthenticatedRequest } from "@/core/middleware/auth.middleware.js"
 import {
   feedbackDetractorsQuerySchema,
   feedbackOverviewQuerySchema,
+  feedbackPendingSurveysQuerySchema,
   feedbackPublicParamsSchema,
+  feedbackSurveyParamsSchema,
+  feedbackSurveyDeliverySchema,
+  feedbackSurveyReissueSchema,
   submitFeedbackResponseSchema,
   updateFeedbackEscalationSchema,
 } from "./feedback.validation.js";
@@ -36,6 +40,20 @@ export class FeedbackController {
         res,
         statusCode: HTTP_STATUS.OK,
         message: "Feedback detractors retrieved successfully",
+        data,
+      });
+    }
+  );
+
+  static getPendingSurveys = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const query = feedbackPendingSurveysQuerySchema.parse(req.query);
+      const data = await FeedbackService.getPendingSurveys(req.user!.companyId, query);
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Pending feedback surveys retrieved successfully",
         data,
       });
     }
@@ -95,6 +113,64 @@ export class FeedbackController {
       data,
     });
   });
+
+  static revealPendingSurveyLink = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const params = feedbackSurveyParamsSchema.parse(req.params);
+      const data = await FeedbackService.revealPendingSurveyLink(
+        req.user!.companyId,
+        req.user!.userId,
+        params.id
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Feedback survey link revealed successfully",
+        data,
+      });
+    }
+  );
+
+  static reissuePendingSurveyToken = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const params = feedbackSurveyParamsSchema.parse(req.params);
+      const body = feedbackSurveyReissueSchema.parse(req.body);
+      const data = await FeedbackService.reissuePendingSurveyToken(
+        req.user!.companyId,
+        req.user!.userId,
+        params.id,
+        body
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Feedback survey token reissued successfully",
+        data,
+      });
+    }
+  );
+
+  static deliverPendingSurvey = asyncHandler(
+    async (req: AuthenticatedRequest, res: Response) => {
+      const params = feedbackSurveyParamsSchema.parse(req.params);
+      const body = feedbackSurveyDeliverySchema.parse(req.body);
+      const data = await FeedbackService.deliverPendingSurvey(
+        req.user!.companyId,
+        req.user!.userId,
+        params.id,
+        body
+      );
+
+      return sendResponse({
+        res,
+        statusCode: HTTP_STATUS.OK,
+        message: "Feedback survey delivery processed",
+        data,
+      });
+    }
+  );
 
   static updateEscalation = asyncHandler(
     async (req: AuthenticatedRequest, res: Response) => {

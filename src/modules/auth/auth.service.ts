@@ -34,6 +34,40 @@ type IssuedAuth = {
 
 const PASSWORD_RESET_TOKEN_MINUTES = 30;
 const USER_INVITE_TOKEN_MINUTES = 60 * 24 * 3;
+// Hard reloads can interrupt a successful refresh response before the browser
+// commits Set-Cookie. Keep a short replay window so the previous token can be
+// redeemed once and recover session continuity without disabling rotation.
+const REFRESH_REPLAY_WINDOW_MS = 30 * 60 * 1000;
+
+const recentRefreshResults = new Map<
+  string,
+  {
+    result: IssuedAuth;
+    expiresAtMs: number;
+  }
+>();
+
+const cleanupRecentRefreshResults = () => {
+  const now = Date.now();
+  for (const [key, value] of recentRefreshResults.entries()) {
+    if (value.expiresAtMs <= now) {
+      recentRefreshResults.delete(key);
+    }
+  }
+};
+
+const readRecentRefreshResult = (tokenHash: string) => {
+  cleanupRecentRefreshResults();
+  return recentRefreshResults.get(tokenHash)?.result ?? null;
+};
+
+const storeRecentRefreshResult = (tokenHash: string, result: IssuedAuth) => {
+  cleanupRecentRefreshResults();
+  recentRefreshResults.set(tokenHash, {
+    result,
+    expiresAtMs: Date.now() + REFRESH_REPLAY_WINDOW_MS,
+  });
+};
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
@@ -634,12 +668,26 @@ export class AuthService {
 
     const now = new Date();
     const tokenHash = hashRefreshToken(refreshToken);
+
+    const replayed = readRecentRefreshResult(tokenHash);
+    if (replayed) {
+      return replayed;
+    }
+
     const session = await prisma.authSession.findUnique({
       where: { tokenHash },
       include: { user: { include: { company: true } } },
     });
 
-    if (!session || session.revokedAt || session.expiresAt <= now) {
+    if (!session) {
+      const recent = readRecentRefreshResult(tokenHash);
+      if (recent) {
+        return recent;
+      }
+      throw invalidSessionError();
+    }
+
+    if (session.revokedAt || session.expiresAt <= now) {
       throw invalidSessionError();
     }
 
@@ -647,28 +695,52 @@ export class AuthService {
 
     const nextRefreshToken = createRefreshToken();
     const nextRefreshExpiresAt = createRefreshExpiry();
-    const updated = await prisma.authSession.update({
-      where: { id: session.id },
+    const nextTokenHash = hashRefreshToken(nextRefreshToken);
+
+    const rotated = await prisma.authSession.updateMany({
+      where: {
+        id: session.id,
+        tokenHash,
+      },
       data: {
-        tokenHash: hashRefreshToken(nextRefreshToken),
+        tokenHash: nextTokenHash,
         expiresAt: nextRefreshExpiresAt,
       },
-      select: { id: true },
     });
+
+    if (rotated.count === 0) {
+      const recent = readRecentRefreshResult(tokenHash);
+      if (recent) {
+        return recent;
+      }
+      throw invalidSessionError();
+    }
 
     const accessToken = generateAccessToken({
       userId: session.user.id,
       companyId: session.user.companyId,
       role: session.user.role,
-      sessionId: updated.id,
+      sessionId: session.id,
     });
+
+    const issued: IssuedAuth = {
+      auth: mapAuthResponse({
+        accessToken,
+        user: session.user,
+        company: session.user.company,
+      }),
+      refreshToken: nextRefreshToken,
+      refreshExpiresAt: nextRefreshExpiresAt,
+    };
+
+    storeRecentRefreshResult(tokenHash, issued);
 
     void AuditLogService.record({
       companyId: session.user.companyId,
       actorId: session.user.id,
       action: "USER_SESSION_REFRESHED",
       entityType: "AUTH_SESSION",
-      entityId: updated.id,
+      entityId: session.id,
       metadata: {
         userId: session.user.id,
       },
@@ -679,20 +751,12 @@ export class AuthService {
           event: "audit_log_write_failed",
           action: "USER_SESSION_REFRESHED",
           companyId: session.user.companyId,
-          entityId: updated.id,
+          entityId: session.id,
         }),
       );
     });
 
-    return {
-      auth: mapAuthResponse({
-        accessToken,
-        user: session.user,
-        company: session.user.company,
-      }),
-      refreshToken: nextRefreshToken,
-      refreshExpiresAt: nextRefreshExpiresAt,
-    };
+    return issued;
   }
 
   static async logout(input: { refreshToken?: string; sessionId?: string }) {
