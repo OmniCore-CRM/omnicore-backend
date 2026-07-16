@@ -513,19 +513,27 @@ export class AnalyticsService {
 
     const teamCount = teams.length;
 
-    // Agent performance and daily aggregates
+    // Agent performance merged with Batch 4 as one conservative wave.
     const agentPerformanceStartedAt = Date.now();
-    const agentPerformance = await fetchAgentPerformance(companyId, window, filters);
-    const agentPerformanceMs = Date.now() - agentPerformanceStartedAt;
+    const agentPerformancePromise = fetchAgentPerformance(
+      companyId,
+      window,
+      filters
+    ).then((value) => ({
+      value,
+      ms: Date.now() - agentPerformanceStartedAt,
+    }));
 
     // Batch 4: Consolidated daily aggregates and team/channel trends
     const batch4StartedAt = Date.now();
     const [
+      agentPerformanceResult,
       ticketDailyTrends,
       channelDaily,
       ticketTeamDaily,
       conversationTeamDaily,
     ] = await Promise.all([
+      agentPerformancePromise,
       prisma.$queryRaw<DateTicketTrendRow[]>`
         WITH ticket_totals AS (
           SELECT
@@ -592,6 +600,8 @@ export class AnalyticsService {
         GROUP BY 1, 2
       `,
     ]);
+    const agentPerformance = agentPerformanceResult.value;
+    const agentPerformanceMs = agentPerformanceResult.ms;
     const batch4Ms = Date.now() - batch4StartedAt;
 
     let previousComparison: {
