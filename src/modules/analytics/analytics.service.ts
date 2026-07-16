@@ -3,6 +3,7 @@ import {
   Prisma,
   SlaStatus,
 } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { prisma } from "@/config/db.js";
 import { mapAnalyticsOverview } from "./analytics.mapper.js";
 import type {
@@ -314,6 +315,12 @@ type AnalyticsOverviewCacheEntry = {
   value: ReturnType<typeof mapAnalyticsOverview>;
 };
 
+export type AnalyticsOverviewCacheDiagnostics = {
+  cacheHit: boolean;
+  keyHash: string;
+  cacheEntryAgeMs: number | null;
+};
+
 export class AnalyticsService {
   private static readonly overviewCache = new Map<
     string,
@@ -349,18 +356,42 @@ export class AnalyticsService {
     ].join(":");
   }
 
+  private static cacheKeyHash(key: string) {
+    return createHash("sha256").update(key).digest("hex").slice(0, 12);
+  }
+
   static async overview(
     companyId: string,
-    query: AnalyticsOverviewQueryInput
+    query: AnalyticsOverviewQueryInput,
+    options?: {
+      onCacheDiagnostics?: (diagnostics: AnalyticsOverviewCacheDiagnostics) => void;
+    }
   ) {
     const window = resolveWindow(query);
     const filters = resolveFilters(query);
     const previousWindow = comparisonWindow(window, query.comparePrevious ?? true);
     const key = this.cacheKey(companyId, window, filters, query.comparePrevious ?? true);
+    const keyHash = this.cacheKeyHash(key);
+    const now = Date.now();
     const cached = this.overviewCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) {
+    if (cached && cached.expiresAt > now) {
+      const cacheEntryAgeMs = Math.max(
+        0,
+        analyticsOverviewCacheTtlMs - (cached.expiresAt - now)
+      );
+      options?.onCacheDiagnostics?.({
+        cacheHit: true,
+        keyHash,
+        cacheEntryAgeMs,
+      });
       return cached.value;
     }
+
+    options?.onCacheDiagnostics?.({
+      cacheHit: false,
+      keyHash,
+      cacheEntryAgeMs: null,
+    });
 
     const customerWhere: Prisma.CustomerWhereInput = {
       companyId,
