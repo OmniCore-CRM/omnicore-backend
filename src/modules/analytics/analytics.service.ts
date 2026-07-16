@@ -319,6 +319,14 @@ export type AnalyticsOverviewCacheDiagnostics = {
   cacheHit: boolean;
   keyHash: string;
   cacheEntryAgeMs: number | null;
+  batch1Ms: number | null;
+  batch2Ms: number | null;
+  batch3Ms: number | null;
+  agentPerformanceMs: number | null;
+  batch4Ms: number | null;
+  comparisonMs: number | null;
+  responseAssemblyMs: number | null;
+  totalServiceMs: number | null;
 };
 
 export class AnalyticsService {
@@ -367,6 +375,7 @@ export class AnalyticsService {
       onCacheDiagnostics?: (diagnostics: AnalyticsOverviewCacheDiagnostics) => void;
     }
   ) {
+    const serviceStartedAt = Date.now();
     const window = resolveWindow(query);
     const filters = resolveFilters(query);
     const previousWindow = comparisonWindow(window, query.comparePrevious ?? true);
@@ -383,6 +392,14 @@ export class AnalyticsService {
         cacheHit: true,
         keyHash,
         cacheEntryAgeMs,
+        batch1Ms: null,
+        batch2Ms: null,
+        batch3Ms: null,
+        agentPerformanceMs: null,
+        batch4Ms: null,
+        comparisonMs: null,
+        responseAssemblyMs: null,
+        totalServiceMs: Date.now() - serviceStartedAt,
       });
       return cached.value;
     }
@@ -391,6 +408,14 @@ export class AnalyticsService {
       cacheHit: false,
       keyHash,
       cacheEntryAgeMs: null,
+      batch1Ms: null,
+      batch2Ms: null,
+      batch3Ms: null,
+      agentPerformanceMs: null,
+      batch4Ms: null,
+      comparisonMs: null,
+      responseAssemblyMs: null,
+      totalServiceMs: null,
     });
 
     const customerWhere: Prisma.CustomerWhereInput = {
@@ -410,6 +435,7 @@ export class AnalyticsService {
 
     // Priority 1 optimization: Conservative parallelization in batches
     // Batch 1: Simple counts and core status groups (4 queries)
+    const batch1StartedAt = Date.now();
     const [customerCount, attachmentCount, conversationStatuses, ticketStatuses] =
       await Promise.all([
         prisma.customer.count({ where: customerWhere }),
@@ -425,8 +451,10 @@ export class AnalyticsService {
           _count: { _all: true },
         }),
       ]);
+    const batch1Ms = Date.now() - batch1StartedAt;
 
     // Batch 2: GroupBy operations (4 queries)
+    const batch2StartedAt = Date.now();
     const [conversationChannels, ticketPriorities, slaGroups, ticketsByTeam] =
       await Promise.all([
         prisma.conversation.groupBy({
@@ -450,8 +478,10 @@ export class AnalyticsService {
           _count: { _all: true },
         }),
       ]);
+    const batch2Ms = Date.now() - batch2StartedAt;
 
     // Batch 3: More queries and complex operations (3-4 queries)
+    const batch3StartedAt = Date.now();
     const [conversationsByTeam, teams, recentActivity, ticketTiming] =
       await Promise.all([
         prisma.conversation.groupBy({
@@ -479,13 +509,17 @@ export class AnalyticsService {
         }),
         fetchTicketTiming(companyId, window, filters),
       ]);
+    const batch3Ms = Date.now() - batch3StartedAt;
 
     const teamCount = teams.length;
 
     // Agent performance and daily aggregates
+    const agentPerformanceStartedAt = Date.now();
     const agentPerformance = await fetchAgentPerformance(companyId, window, filters);
+    const agentPerformanceMs = Date.now() - agentPerformanceStartedAt;
 
     // Batch 4: Consolidated daily aggregates and team/channel trends
+    const batch4StartedAt = Date.now();
     const [
       ticketDailyTrends,
       channelDaily,
@@ -558,6 +592,7 @@ export class AnalyticsService {
         GROUP BY 1, 2
       `,
     ]);
+    const batch4Ms = Date.now() - batch4StartedAt;
 
     let previousComparison: {
       from: Date;
@@ -569,6 +604,8 @@ export class AnalyticsService {
       firstResponseAvgMinutes: number | null;
       resolutionAvgMinutes: number | null;
     } | null = null;
+
+    const comparisonStartedAt = Date.now();
 
     if (previousWindow) {
       const [prevConversationStatuses, prevTicketStatuses, prevSlaGroups, prevTiming] =
@@ -619,7 +656,9 @@ export class AnalyticsService {
         resolutionAvgMinutes: prevTiming.resolutionAvgMinutes,
       };
     }
+    const comparisonMs = Date.now() - comparisonStartedAt;
 
+    const responseAssemblyStartedAt = Date.now();
     const buckets = dateBuckets(window.from, window.to);
 
     const conversationDailyMap = new Map<string, number>();
@@ -775,6 +814,23 @@ export class AnalyticsService {
     this.overviewCache.set(key, {
       expiresAt: Date.now() + analyticsOverviewCacheTtlMs,
       value: mapped,
+    });
+
+    const responseAssemblyMs = Date.now() - responseAssemblyStartedAt;
+    const totalServiceMs = Date.now() - serviceStartedAt;
+
+    options?.onCacheDiagnostics?.({
+      cacheHit: false,
+      keyHash,
+      cacheEntryAgeMs: null,
+      batch1Ms,
+      batch2Ms,
+      batch3Ms,
+      agentPerformanceMs,
+      batch4Ms,
+      comparisonMs,
+      responseAssemblyMs,
+      totalServiceMs,
     });
 
     return mapped;
