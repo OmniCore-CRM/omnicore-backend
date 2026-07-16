@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { prisma } from "@/config/db.js";
+import { createAnalyticsCacheStore } from "@/core/cache/analytics-cache.js";
 import { mapAnalyticsOverview } from "./analytics.mapper.js";
 import type {
   AnalyticsOverviewQueryInput,
@@ -310,13 +311,24 @@ const toDailyMap = <T extends { day: Date; count: number }>(rows: T[]) => {
   return map;
 };
 
-type AnalyticsOverviewCacheEntry = {
-  expiresAt: number;
+type ComputeResult = {
   value: ReturnType<typeof mapAnalyticsOverview>;
+  batch1Ms: number;
+  batch2Ms: number;
+  batch3Ms: number;
+  agentPerformanceMs: number;
+  batch4Ms: number;
+  comparisonMs: number;
+  responseAssemblyMs: number;
 };
 
 export type AnalyticsOverviewCacheDiagnostics = {
+  /** Backward-compatible: true for fresh and stale hits, false for miss. */
   cacheHit: boolean;
+  /** SWR state for this response. */
+  cacheState: "miss" | "fresh" | "stale";
+  /** Which backing store served or attempted to serve the entry. */
+  cacheSource: "redis" | "memory";
   keyHash: string;
   cacheEntryAgeMs: number | null;
   batch1Ms: number | null;
@@ -330,9 +342,16 @@ export type AnalyticsOverviewCacheDiagnostics = {
 };
 
 export class AnalyticsService {
-  private static readonly overviewCache = new Map<
+  /** Shared SWR cache (Redis when configured, in-memory fallback otherwise). */
+  private static readonly cacheStore = createAnalyticsCacheStore();
+
+  /**
+   * In-process deduplication map. Prevents concurrent requests in the same
+   * process from each triggering a full cold-path computation.
+   */
+  private static readonly inFlightMap = new Map<
     string,
-    AnalyticsOverviewCacheEntry
+    Promise<ReturnType<typeof mapAnalyticsOverview>>
   >();
 
   private static presetRangeBucket(windowTo: Date) {
@@ -368,6 +387,8 @@ export class AnalyticsService {
     return createHash("sha256").update(key).digest("hex").slice(0, 12);
   }
 
+  // ---- Public entry point ----
+
   static async overview(
     companyId: string,
     query: AnalyticsOverviewQueryInput,
@@ -381,15 +402,65 @@ export class AnalyticsService {
     const previousWindow = comparisonWindow(window, query.comparePrevious ?? true);
     const key = this.cacheKey(companyId, window, filters, query.comparePrevious ?? true);
     const keyHash = this.cacheKeyHash(key);
+
+    // 1. In-process coalescing: if the same key is already being computed in
+    //    this process, await the existing promise instead of re-running queries.
+    const inflight = this.inFlightMap.get(keyHash);
+    if (inflight !== undefined) {
+      const value = await inflight;
+      options?.onCacheDiagnostics?.({
+        cacheHit: false,
+        cacheState: "miss",
+        cacheSource: this.cacheStore.source,
+        keyHash,
+        cacheEntryAgeMs: null,
+        batch1Ms: null,
+        batch2Ms: null,
+        batch3Ms: null,
+        agentPerformanceMs: null,
+        batch4Ms: null,
+        comparisonMs: null,
+        responseAssemblyMs: null,
+        totalServiceMs: Date.now() - serviceStartedAt,
+      });
+      return value;
+    }
+
+    // 2. SWR cache lookup.
+    const entry = await this.cacheStore.get(keyHash);
     const now = Date.now();
-    const cached = this.overviewCache.get(key);
-    if (cached && cached.expiresAt > now) {
-      const cacheEntryAgeMs = Math.max(
-        0,
-        analyticsOverviewCacheTtlMs - (cached.expiresAt - now)
-      );
+
+    if (entry !== null) {
+      if (entry.freshUntil > now) {
+        // FRESH HIT — serve directly, no DB work.
+        const cacheEntryAgeMs = Math.max(
+          0,
+          now - (entry.freshUntil - analyticsOverviewCacheTtlMs)
+        );
+        options?.onCacheDiagnostics?.({
+          cacheHit: true,
+          cacheState: "fresh",
+          cacheSource: this.cacheStore.source,
+          keyHash,
+          cacheEntryAgeMs,
+          batch1Ms: null,
+          batch2Ms: null,
+          batch3Ms: null,
+          agentPerformanceMs: null,
+          batch4Ms: null,
+          comparisonMs: null,
+          responseAssemblyMs: null,
+          totalServiceMs: Date.now() - serviceStartedAt,
+        });
+        return entry.value as ReturnType<typeof mapAnalyticsOverview>;
+      }
+
+      // STALE HIT — serve immediately, kick off background refresh.
+      const cacheEntryAgeMs = now - entry.freshUntil;
       options?.onCacheDiagnostics?.({
         cacheHit: true,
+        cacheState: "stale",
+        cacheSource: this.cacheStore.source,
         keyHash,
         cacheEntryAgeMs,
         batch1Ms: null,
@@ -401,23 +472,105 @@ export class AnalyticsService {
         responseAssemblyMs: null,
         totalServiceMs: Date.now() - serviceStartedAt,
       });
-      return cached.value;
+      void this.backgroundRefresh(keyHash, companyId, window, filters, previousWindow);
+      return entry.value as ReturnType<typeof mapAnalyticsOverview>;
     }
 
-    options?.onCacheDiagnostics?.({
-      cacheHit: false,
-      keyHash,
-      cacheEntryAgeMs: null,
-      batch1Ms: null,
-      batch2Ms: null,
-      batch3Ms: null,
-      agentPerformanceMs: null,
-      batch4Ms: null,
-      comparisonMs: null,
-      responseAssemblyMs: null,
-      totalServiceMs: null,
-    });
+    // 3. COLD MISS — compute with in-process coalescing + distributed lock.
+    const computePromise = (async (): Promise<ComputeResult> => {
+      // Try to acquire a distributed lock so only one process computes for this
+      // key at a time. Proceed regardless — the inFlightMap already deduplicates
+      // within-process, and a brief duplicate across processes is preferable to
+      // blocking the user indefinitely.
+      const lockAcquired = await this.cacheStore.acquireLock(keyHash);
+      try {
+        const result = await this.compute(companyId, window, filters, previousWindow);
+        await this.cacheStore.set(keyHash, {
+          freshUntil: Date.now() + analyticsOverviewCacheTtlMs,
+          value: result.value,
+        });
+        return result;
+      } finally {
+        if (lockAcquired) {
+          void this.cacheStore.releaseLock(keyHash);
+        }
+      }
+    })();
 
+    // Register the value promise so concurrent callers coalesce onto it.
+    this.inFlightMap.set(keyHash, computePromise.then((r) => r.value));
+
+    try {
+      const result = await computePromise;
+      options?.onCacheDiagnostics?.({
+        cacheHit: false,
+        cacheState: "miss",
+        cacheSource: this.cacheStore.source,
+        keyHash,
+        cacheEntryAgeMs: null,
+        batch1Ms: result.batch1Ms,
+        batch2Ms: result.batch2Ms,
+        batch3Ms: result.batch3Ms,
+        agentPerformanceMs: result.agentPerformanceMs,
+        batch4Ms: result.batch4Ms,
+        comparisonMs: result.comparisonMs,
+        responseAssemblyMs: result.responseAssemblyMs,
+        totalServiceMs: Date.now() - serviceStartedAt,
+      });
+      return result.value;
+    } finally {
+      this.inFlightMap.delete(keyHash);
+    }
+  }
+
+  // ---- Background SWR refresh ----
+
+  private static async backgroundRefresh(
+    keyHash: string,
+    companyId: string,
+    window: Window,
+    filters: AnalyticsFilters,
+    previousWindow: ReturnType<typeof comparisonWindow>
+  ): Promise<void> {
+    const lockAcquired = await this.cacheStore.acquireLock(keyHash);
+    if (!lockAcquired) return;
+
+    try {
+      const result = await this.compute(companyId, window, filters, previousWindow);
+      await this.cacheStore.set(keyHash, {
+        freshUntil: Date.now() + analyticsOverviewCacheTtlMs,
+        value: result.value,
+      });
+      console.info(
+        JSON.stringify({
+          level: "info",
+          event: "analytics_cache_refresh_completed",
+          keyHash,
+        })
+      );
+    } catch (error) {
+      // Stale entry remains; the next stale hit will retry.
+      console.info(
+        JSON.stringify({
+          level: "warn",
+          event: "analytics_cache_refresh_failed",
+          keyHash,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
+    } finally {
+      void this.cacheStore.releaseLock(keyHash);
+    }
+  }
+
+  // ---- Core compute — all batch queries and response assembly ----
+
+  private static async compute(
+    companyId: string,
+    window: Window,
+    filters: AnalyticsFilters,
+    previousWindow: ReturnType<typeof comparisonWindow>
+  ): Promise<ComputeResult> {
     const customerWhere: Prisma.CustomerWhereInput = {
       companyId,
       ...createdAtWhere(window.from, window.to),
@@ -821,18 +974,10 @@ export class AnalyticsService {
       },
     });
 
-    this.overviewCache.set(key, {
-      expiresAt: Date.now() + analyticsOverviewCacheTtlMs,
-      value: mapped,
-    });
-
     const responseAssemblyMs = Date.now() - responseAssemblyStartedAt;
-    const totalServiceMs = Date.now() - serviceStartedAt;
 
-    options?.onCacheDiagnostics?.({
-      cacheHit: false,
-      keyHash,
-      cacheEntryAgeMs: null,
+    return {
+      value: mapped,
       batch1Ms,
       batch2Ms,
       batch3Ms,
@@ -840,9 +985,6 @@ export class AnalyticsService {
       batch4Ms,
       comparisonMs,
       responseAssemblyMs,
-      totalServiceMs,
-    });
-
-    return mapped;
+    };
   }
 }

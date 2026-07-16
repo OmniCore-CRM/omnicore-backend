@@ -21,6 +21,8 @@ export class AnalyticsController {
 
       let cacheDiagnostics: AnalyticsOverviewCacheDiagnostics = {
         cacheHit: false,
+        cacheState: "miss",
+        cacheSource: "memory",
         keyHash: "unknown",
         cacheEntryAgeMs: null,
         batch1Ms: null,
@@ -40,6 +42,8 @@ export class AnalyticsController {
             event: "analytics_overview_cache_diagnostics",
             requestId,
             cacheHit: cacheDiagnostics.cacheHit,
+            cacheState: cacheDiagnostics.cacheState,
+            cacheSource: cacheDiagnostics.cacheSource,
             keyHash: cacheDiagnostics.keyHash,
             processBootId: analyticsProcessBootId,
             cacheEntryAgeMs: cacheDiagnostics.cacheEntryAgeMs,
@@ -69,6 +73,8 @@ export class AnalyticsController {
       );
 
       res.setHeader("X-Analytics-Cache", cacheDiagnostics.cacheHit ? "hit" : "miss");
+      res.setHeader("X-Analytics-Cache-State", cacheDiagnostics.cacheState);
+      res.setHeader("X-Analytics-Cache-Source", cacheDiagnostics.cacheSource);
       res.setHeader("X-Analytics-Key-Hash", cacheDiagnostics.keyHash);
       res.setHeader("X-Analytics-Process-Boot-Id", analyticsProcessBootId);
       if (cacheDiagnostics.batch1Ms !== null) {

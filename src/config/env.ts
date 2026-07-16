@@ -58,6 +58,8 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().optional(),
   EMAIL_WEBHOOK_SECRET: z.string().optional(),
 
+  REDIS_URL: z.string().optional(),
+
   DEVELOPMENT_INGESTION_COMPANY_ID: z.string().optional(),
   ALLOW_UNSIGNED_WEBHOOKS_IN_DEVELOPMENT: z.string().optional(),
 }).superRefine((value, ctx) => {
