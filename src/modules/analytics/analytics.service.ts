@@ -354,23 +354,20 @@ export class AnalyticsService {
     Promise<ReturnType<typeof mapAnalyticsOverview>>
   >();
 
-  private static presetRangeBucket(windowTo: Date) {
-    const bucketStartMs =
-      Math.floor(windowTo.getTime() / analyticsOverviewCacheTtlMs) *
-      analyticsOverviewCacheTtlMs;
-    return new Date(bucketStartMs).toISOString();
-  }
-
   private static cacheKey(
     companyId: string,
     window: { range: AnalyticsOverviewRange; from: Date | null; to: Date },
     filters: AnalyticsFilters,
     comparePrevious: boolean
   ) {
+    // Custom ranges use exact start/end ISO strings (already stable).
+    // Preset ranges use the string "preset" — the cache entry's freshUntil
+    // timestamp controls staleness; the key must not include a rotating time
+    // component, otherwise SWR stale hits can never occur.
     const windowKey =
       window.range === "custom"
         ? `${window.from?.toISOString() ?? "null"}:${window.to.toISOString()}`
-        : `preset-bucket:${this.presetRangeBucket(window.to)}`;
+        : "preset";
 
     return [
       companyId,
