@@ -19,6 +19,7 @@ import notificationRoutes from "@/modules/notifications/notification.routes.js";
 import assignmentCenterRoutes from "@/modules/assignment-center/assignment-center.routes.js";
 import companyRoutes from "@/modules/companies/company.routes.js";
 import feedbackRoutes from "@/modules/feedback/feedback.routes.js";
+import { aiRouter } from "@/modules/ai/ai.routes.js";
 
 const router = Router();
 
@@ -54,6 +55,9 @@ router.use("/assignment-rules", assignmentRuleRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/assignment-center", assignmentCenterRoutes);
 router.use("/feedback", feedbackRoutes);
+
+// AI routes
+router.use("/ai", aiRouter);
 
 // Widget routes
 router.use("/widget", widgetRoutes);

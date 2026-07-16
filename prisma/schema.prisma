@@ -242,6 +242,19 @@ enum DomainStatus {
   FAILED
 }
 
+enum AIInteractionRequestType {
+  REPLY_SUGGESTION
+  SUMMARY
+  ROUTING_SUGGESTION
+  ESCALATION_RECOMMENDATION
+}
+
+enum AIInteractionUserAction {
+  ACCEPTED
+  EDITED
+  REJECTED
+}
+
 model Company {
   id                   String  @id @default(cuid())
   name                 String
@@ -294,6 +307,7 @@ model Company {
   feedbackSurveys         FeedbackSurvey[]
   feedbackResponses       FeedbackResponse[]
   feedbackEscalations     FeedbackEscalation[]
+  aiInteractions          AIInteraction[]
 }
 
 model User {
@@ -332,6 +346,7 @@ model User {
   notifications          Notification[]
   assignedFeedbackSurveys     FeedbackSurvey[]     @relation("FeedbackSurveyAssignee")
   assignedFeedbackEscalations FeedbackEscalation[] @relation("FeedbackEscalationAssignee")
+  aiInteractions         AIInteraction[]
 
   @@index([companyId, firstName, lastName])
   @@index([companyId, status, firstName, lastName])
@@ -461,6 +476,7 @@ model Conversation {
   attachments Attachment[]
   feedbackSurveys   FeedbackSurvey[]
   feedbackResponses FeedbackResponse[]
+  aiInteractions AIInteraction[]
 
   @@index([companyId])
   @@index([customerId])
@@ -524,6 +540,7 @@ model Message {
   attachments Attachment[]
   retryState  MessageRetryState?
   dlqItems    ChannelDeadLetterItem[]
+  aiInteraction AIInteraction?
 
   @@index([companyId])
   @@index([conversationId])
@@ -1290,4 +1307,44 @@ model FeedbackEscalation {
   @@index([companyId])
   @@index([companyId, status, createdAt])
   @@index([companyId, assignedToId, status])
+}
+
+model AIInteraction {
+  id String @id @default(cuid())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  requestType AIInteractionRequestType
+  inputContext Json
+
+  generatedSuggestion String
+  confidence Decimal @db.Decimal(5, 2)
+  costMicroUSD Int?
+
+  userAction AIInteractionUserAction?
+  acceptedAt DateTime?
+  editedContent String?
+
+  sentAsMessageId String? @unique
+  sentAsMessage Message? @relation(fields: [sentAsMessageId], references: [id], onDelete: SetNull)
+
+  provider String
+  modelId String?
+  tokensUsed Int?
+  responseTimeMs Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([conversationId])
+  @@index([companyId, createdAt])
+  @@index([companyId, userId, createdAt])
 }
