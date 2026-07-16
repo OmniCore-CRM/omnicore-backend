@@ -1,6 +1,6 @@
 import { prisma } from "@/config/db.js";
 import { AIProvider, AIReplyContext } from "@/core/ai-provider.js";
-import { DeepSeekAIProvider } from "@/core/deepseek-provider.js";
+import { OpenRouterAIProvider } from "@/core/openrouter-provider.js";
 import type { AccessTokenPayload } from "../auth/auth.utils.js";
 
 export interface AIInteractionDTO {
@@ -27,7 +27,7 @@ export class AIService {
     }
 
     try {
-      this.provider = new DeepSeekAIProvider();
+      this.provider = new OpenRouterAIProvider();
       return this.provider;
     } catch (error) {
       this.initError = error instanceof Error ? error : new Error(String(error));
