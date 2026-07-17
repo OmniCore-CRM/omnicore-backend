@@ -8,12 +8,15 @@ import {
  * OpenRouterAIProvider
  *
  * Uses the OpenAI-compatible endpoint at https://openrouter.ai/api/v1/chat/completions.
- * Defaults to the `openrouter/auto` free tier model.
+ * Defaults to the `openrouter/free` model.
  *
- * Cost tracking is best-effort: OpenRouter exposes usage in the same shape as
- * the OpenAI API so we read it when available, but the free tier often returns
- * zeroes.  costMicroUSD is stored as 0 in those cases — the audit record is
- * still written so operators can see suggestions were made.
+ * Model selection order:
+ * - explicit constructor argument
+ * - OPENROUTER_MODEL
+ * - openrouter/free
+ *
+ * Cost tracking is conservative: for free routing, provider cost is 0 unless
+ * OpenRouter returns explicit authoritative cost metadata in the response.
  */
 export class OpenRouterAIProvider implements AIProvider {
   name = "openrouter";
@@ -23,14 +26,17 @@ export class OpenRouterAIProvider implements AIProvider {
 
   private apiKey: string;
   private baseUrl = "https://openrouter.ai/api/v1";
-  private model: string;
+  readonly model: string;
 
-  constructor(model = "openrouter/auto") {
+  constructor(model?: string) {
     this.apiKey = process.env.OPENROUTER_API_KEY || "";
     if (!this.apiKey) {
       throw new Error("OPENROUTER_API_KEY not configured");
     }
-    this.model = model;
+    this.model =
+      model?.trim() ||
+      process.env.OPENROUTER_MODEL?.trim() ||
+      "openrouter/free";
   }
 
   validateInput(context: AIReplyContext): { valid: boolean; reason?: string } {
@@ -89,7 +95,14 @@ export class OpenRouterAIProvider implements AIProvider {
 
       const data = (await response.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
-        usage?: { prompt_tokens?: number; completion_tokens?: number };
+        usage?: {
+          prompt_tokens?: number;
+          completion_tokens?: number;
+          cost?: number;
+          total_cost?: number;
+        };
+        cost?: number;
+        total_cost?: number;
       };
 
       const suggestion = data.choices?.[0]?.message?.content?.trim() ?? "";
@@ -99,10 +112,7 @@ export class OpenRouterAIProvider implements AIProvider {
 
       const usage = data.usage ?? {};
       const responseTimeMs = Date.now() - startTime;
-      const costMicroUSD = this.calculateCost(
-        usage.prompt_tokens ?? 0,
-        usage.completion_tokens ?? 0
-      );
+      const costMicroUSD = this.extractAuthoritativeCostMicroUSD(data);
 
       return {
         suggestion,
@@ -146,11 +156,21 @@ ${messagesText}
 Suggest a reply:`;
   }
 
-  private calculateCost(inputTokens: number, outputTokens: number): number {
-    const inputCost =
-      (inputTokens / 1_000_000) * this.costPerMillionInputTokens;
-    const outputCost =
-      (outputTokens / 1_000_000) * this.costPerMillionOutputTokens;
-    return Math.round((inputCost + outputCost) * 1_000_000);
+  private extractAuthoritativeCostMicroUSD(data: {
+    usage?: { cost?: number; total_cost?: number };
+    cost?: number;
+    total_cost?: number;
+  }): number {
+    const rawCostUSD =
+      data.usage?.cost ??
+      data.usage?.total_cost ??
+      data.cost ??
+      data.total_cost;
+
+    if (typeof rawCostUSD !== "number" || !Number.isFinite(rawCostUSD) || rawCostUSD < 0) {
+      return 0;
+    }
+
+    return Math.round(rawCostUSD * 1_000_000);
   }
 }

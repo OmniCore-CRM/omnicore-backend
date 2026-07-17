@@ -95,6 +95,7 @@ export class AIService {
       const aiResponse = await this.ensureProvider().generateReplySuggestion(
         context
       );
+      const activeProvider = this.ensureProvider();
 
       // Store interaction for audit
       const interaction = await prisma.aIInteraction.create({
@@ -107,7 +108,11 @@ export class AIService {
           generatedSuggestion: aiResponse.suggestion,
           confidence: aiResponse.confidence,
           costMicroUSD: aiResponse.costMicroUSD,
-          provider: this.ensureProvider().name,
+          provider: activeProvider.name,
+          modelId:
+            activeProvider instanceof OpenRouterAIProvider
+              ? activeProvider.model
+              : null,
           tokensUsed: aiResponse.tokensUsed,
           responseTimeMs: aiResponse.providerResponseTimeMs,
         },
@@ -121,7 +126,7 @@ export class AIService {
     } catch (error) {
       // Wrap configuration errors with helpful message
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("DEEPSEEK_API_KEY")) {
+      if (message.includes("OPENROUTER_API_KEY")) {
         throw new Error(
           "AI suggestions are not configured. Please contact your administrator."
         );
